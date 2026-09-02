@@ -1,8 +1,12 @@
 robot:
   _target_: gello.robots.yam.YAMRobot
-  channel: can_follower_r
+  # can0 = RIGHT arm -- VERIFIED 2026-09-02 (hand-moving the LEFT arm showed up
+  # on can1 only; can0 stayed at its noise floor). See yam_left.yaml.
+  channel: can0
 agent:
   _target_: gello.agents.gello_agent.GelloAgent
+  # VERIFIED 2026-09-02: answers at 57600 with Dynamixel IDs
+  # [8,9,10,11,12,13,14] -- matches joint_ids + gripper_config below exactly.
   port: /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTAO9WCV-if00-port0
   dynamixel_config:
     _target_: gello.agents.gello_agent.DynamixelRobotConfig

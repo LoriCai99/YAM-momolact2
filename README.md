@@ -1,6 +1,17 @@
 # Bimanual YAM
 A robotics framework for Teleoperation, Data Collection, and model evaluation on Bimanual YAM.
 
+> ### ▶ Running the rig on `prior-workstation-4`? Read **[RUNBOOK.md](RUNBOOK.md)** instead.
+>
+> This README documents the project generically and reflects a **different**
+> workstation: it refers to the `ai2_yam` conda env and CAN interfaces named
+> `can_leader_l` / `can_follower_r`, **none of which exist on our machine**
+> (we use the `yam` env with `can1` = left and `can0` = right).
+>
+> [RUNBOOK.md](RUNBOOK.md) is the verified, machine-specific guide: startup
+> sequence, teleop, data collection, diagnostics and troubleshooting.
+> [CLAUDE.md](CLAUDE.md) has the deeper engineering notes.
+
 ## Repository Layout
 | Path | What it is |
 |---|---|

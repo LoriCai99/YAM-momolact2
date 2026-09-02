@@ -21,23 +21,35 @@ Top-level layout:
 
 ## This machine's environment
 
-- **Conda env:** `ai2_yam` (Python 3.11). Always `conda activate ai2_yam` before running anything.
-- **CAN interfaces (machine-specific!):** `can_leader_l` (left arm) and `can_follower_r` (right arm). Verify with `ip link show | grep can` before assuming names.
-- The configs already point at the right channels:
-  - `gello_software/configs/yam_left.yaml` → `channel: can_leader_l`
-  - `gello_software/configs/yam_right.yaml` → `channel: can_follower_r`
+> Re-surveyed 2026-09-02. The previous contents of this section described a
+> *different* workstation (`ai2_yam` env, `can_leader_l`/`can_follower_r`,
+> `/home/kostas-lab/...`) and did not match any hardware here.
+
+- **Conda env:** `yam` (Python 3.12) at `/opt/conda/envs/yam`. There is no `ai2_yam` env on this box. `yam_convert` is a separate, lerobot-only env (kept apart because lerobot needs `huggingface-hub>=1.0` while the MolmoAct server path needs `<1.0`).
+- **CAN interfaces:** plain **`can0`** and **`can1`** — there are no udev naming rules, so nothing produces `can_leader_l`/`can_follower_r`. Both are gs_usb (OpenMoko 1d50:606f) adapters; `can0` is USB path `1-7`, `can1` is `1-8`.
+  - **`can1` = LEFT arm, `can0` = RIGHT arm** — verified 2026-09-02 by hand-moving the left arm with motors de-energized and diffing joint positions across both buses (`can1` shifted up to 0.046 rad on joints 1/5/6; `can0` stayed at its 0.0004 rad noise floor). Note `/home/evan/carter/STATUS.md` states the *opposite* mapping and is stale.
+- **RealSense cameras:** D435 `922612071156` (front/top role), D405 `335122270697` (left), D405 `218622275075` (right) — confirmed against the physical rig by the operator 2026-09-02. Order must stay `[front/top, left, right]`, the order MolmoAct2 was trained on. Inspect live with `python gello_software/scripts/view_cameras.py` (3-pane cv2 viewer; `q` quits, `s` snapshots — quit it before teleop/collection, cameras are exclusive-access).
+- **Camera USB caveats.** The D435 negotiates only **USB 2.1** (it sits on a 480 Mbps root hub) — fine for 640x480@30, suspect the cable for anything more. Both D405s are USB 3.2 but were originally on `05:00.0`, an **ASMedia ASM2142/3142** controller that dropped both mid-session; recover without a reboot via `echo 1 | sudo tee /sys/bus/pci/devices/0000:05:00.0/remove && echo 1 | sudo tee /sys/bus/pci/rescan`. Keep them on separate controllers if possible.
+- **`i2rt` is NOT the vendored copy.** The `yam` env has an editable install pointing at `/home/evan/i2rt` (v1.2.4), which is *newer* than this repo's `i2rt/` subdir. `get_yam_robot()` there is API-compatible with `gello/robots/yam.py`, but be aware `import i2rt` never reads the in-repo tree.
+- **GELLO leader:** working as of 2026-09-02. Two FT232H (U2D2) adapters, and the `port:` values already in the configs are correct:
+  - `FTAO9WPU` → left, answers at **57600** with Dynamixel IDs `[1..7]`
+  - `FTAO9WCV` → right, answers at **57600** with IDs `[8..14]`
+  - Diagnose with `python gello_software/scripts/ping_gello.py` (broadcast-pings every FTDI port at every common baudrate; never blocks). `evan` has been added to `dialout` but **needs a re-login** — until then wrap commands in `sg dialout -c "..."`.
+- **Motor watchdogs are already set.** All 14 motors read back `timeout=8000` (400 ms) from flash, so the `set_timeout.py` step in the startup sequence is a no-op here — skip it unless a motor is replaced. Read current values without writing via `get_special_message_response(ci, id, "timeout")`.
+- **If the arms/GELLO go silent, it is almost always actuator power, not config.** Every adapter (both gs_usb CAN and both FT232H) is USB-bus powered and enumerates fine with nothing alive downstream. Two fast discriminators: `cansend can1 001#11` returning `write: No buffer space available` means no CAN node is ACKing (the TX queue wedges — you must `bash i2rt/scripts/reset_all_can.sh` afterwards to clear it), and a raw-serial broadcast ping returning *zero* bytes (rather than garbage) means the Dynamixel bus is unpowered rather than misconfigured.
+- **A stale camera server may be holding all 3 cameras.** PID 124458 (`/home/evan/i2rt/.venv/bin/python examples/yam/camera_server.py --config /home/evan/carter/configs/yam_left.yaml`) has been running since Aug 16 and binds ZMQ `:5555`/`:5556`. It blocks any in-process RealSense open (data collection, replay). Teleop is unaffected — `launch_yaml.py` never opens cameras.
 - Other config files in `gello_software/configs/` (e.g. `yam_passive.yaml`, `yam_active.yaml`) still use legacy `can_left`/`can_right` names — they are not the active configs and may be stale.
 
 ## Standard startup sequence (every fresh boot / replug)
 
 ```bash
-conda activate ai2_yam
-sh i2rt/scripts/reset_all_can.sh
-python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_leader_l --timeout
-python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_follower_r --timeout
+conda activate yam
+bash i2rt/scripts/reset_all_can.sh   # bash, not sh: the script uses [[ ]]
+python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can1 --timeout   # left
+python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can0 --timeout   # right
 # Only if using the linear gripper at full grip and the gripper drifted on power-cycle:
-python i2rt/i2rt/motor_config_tool/set_zero.py --channel=can_leader_l --motor_id=7
-python i2rt/i2rt/motor_config_tool/set_zero.py --channel=can_follower_r --motor_id=7
+python i2rt/i2rt/motor_config_tool/set_zero.py --channel=can1 --motor_id=7   # left
+python i2rt/i2rt/motor_config_tool/set_zero.py --channel=can0 --motor_id=7   # right
 ```
 
 `set_timeout.py --timeout` sets the motor watchdog to **400ms** (writes `8000`; 8000 × 0.05ms = 400ms) for motors 1–7 and saves it to flash (persists across power cycles). This is the desired state: on `ctrl+C` the command stream stops and the motors auto-de-energize (damping) ~400ms later — the arm safely powers down (LED green→red) instead of holding torque and forcing a physical power-cut. Do **not** use the no-flag form (`set_timeout.py` without `--timeout`), which writes `0` = watchdog disabled — that leaves the arm energized after exit. 400ms does not cause mid-run collapse: the CAN command stream is driven by a dedicated 250Hz background thread (`i2rt/i2rt/robots/motor_chain_robot.py:start_server`), giving ~100× margin; the watchdog only fires when the stream genuinely stops (i.e. on shutdown). The old "default timeout is too short / causes collapse" note was wrong — 400ms is the factory default and is fine for teleop/eval. **One caveat:** that 250Hz thread is pure Python, so a multi-second GIL-holding operation on the main thread *while the motors are live* will starve it and trip the watchdog — symptom is both buses reporting `loss communication` at the same instant. The MolmoAct local model load is exactly such an operation, which is why `launch_yaml_eval_molmoact.py` loads the policy (`_build_policy`) **before** `_build_env` energizes the motors. Keep any heavy/blocking init ahead of robot construction.
@@ -69,6 +81,22 @@ bash gello_software/scripts/start_camera_server.sh    # script hardcodes --confi
 
 Set `eval.camera_server.enabled: false` to fall back to the in-process camera path (slower; the viewer freezes during inference). Data collection / replay / open-loop launchers still use the in-process path — the flag is per-launcher.
 
+## Diagnostic scripts added 2026-09-02
+
+Written while bringing this workstation up; all live in `gello_software/scripts/`.
+
+| Script | Use |
+|---|---|
+| `ping_gello.py` | Broadcast-pings every FTDI port at every common baudrate and prints which Dynamixel IDs answer. Never blocks (unlike `DynamixelDriver`). First thing to run when teleop hangs or a leader is unresponsive. |
+| `view_cameras.py` | Live 3-pane cv2 view (FRONT/LEFT/RIGHT) for aiming and identifying cameras. `q` quits, `s` snapshots to `/tmp/`. Quit before teleop/collection — cameras are exclusive-access. |
+| `calibrate_gripper.py` | Measures a GELLO trigger's true angular range and prints a ready-to-paste `gripper_config`. Needed because both configs shipped with identical values from another workstation's build. |
+
+## Known-bad failure modes on this box
+
+- **`launch_yaml.py` hangs silently with no output.** [`gello/dynamixel/driver.py:509`](gello_software/gello/dynamixel/driver.py#L509) spins on `while self._joint_angles is None: time.sleep(0.1)` with no timeout. `_initialize_hardware()` counts as success once the *port* opens, so a non-responding servo only prints `Failed to set torque mode for Dynamixel with ID 1` and then blocks forever. Run `scripts/ping_gello.py` to confirm before debugging anything else.
+- **`DynamixelDriver` can deadlock on sudo.** `_fix_port_permissions()` shells `sudo chmod 666` with `capture_output=True`, so it blocks forever on the password prompt. Also `use_fake_fallback=True` is the default, so some failure paths silently substitute a fake leader stuck at zeros.
+- **`online motors: []` usually means the CAN interface went down, not dead arms.** A USB re-enumeration leaves `can0`/`can1` DOWN; `cansend can1 001#11` then reports `Network is down`. Fix with `bash i2rt/scripts/reset_all_can.sh` — run it immediately before every launch. Distinguish from unpowered arms: unpowered gives `No buffer space available` (nothing ACKs, TX queue wedges) rather than `Network is down`.
+
 ## Tests
 
 `gello_software/tests/` has pytest coverage for the camera server (`_snapshot`, `_maybe_heartbeat`, end-to-end REQ/REP wire protocol, stale-frame detection) and the MolmoAct eval launcher (`dynamic_smoothing`, `_park_robot`, `_convert_if_any`, `run_one_rollout`). All tests use inline fakes — no RealSense / no CAN motors required.
@@ -81,7 +109,7 @@ cd gello_software && python -m pytest tests/ -q
 
 ## Conventions / gotchas
 
-- **Don't blindly copy commands from README that reference `can_left`/`can_right`** for this machine — use `can_leader_l`/`can_follower_r`. If updating docs, mirror what's actually in `yam_left.yaml`/`yam_right.yaml`.
+- **Don't blindly copy CAN channel names out of `README.md` or `docs/grasp_lab_eval.md`** — both still document the GRASP-lab wiring (`can_leader_l`/`can_follower_r`) and `configs/yam_passive.yaml`/`yam_active.yaml` use the older `can_left`/`can_right`. On *this* machine the only real interfaces are `can0`/`can1`; mirror what's actually in `yam_left.yaml`/`yam_right.yaml`.
 - The data-collection keypad (`s` start / `a` save+end / `b` discard+end) requires keyboard focus on the color pad window. `ctrl+c` only does cleanup — it skips the convert/upload pipeline.
 - For `launch_yaml_eval_molmoact.py`, `ctrl+c` IS handled gracefully: the in-progress rollout is flushed to `eval/{timestamp}/` with an `err.md` marker, and the LeRobot conversion still runs over rollouts already labeled in this session.
 - Conversion (`molmoact_to_lerobot_v30.py`) defaults to reading `gello_software/configs/yam_left.yaml` for `data_dir`, `output_dir`, and upload settings; CLI flags override.

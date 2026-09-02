@@ -1,19 +1,43 @@
 # cameras
+# RealSense serials on THIS workstation, CONFIRMED by the operator 2026-09-02
+# as matching the physical rig. Camera order must stay [front/top, left, right]
+# -- the order MolmoAct2-BimanualYAM was trained on; front_camera is the "top".
+# Inspect live at any time with: python scripts/view_cameras.py
 sensors:
   cameras:
     left_camera:
-      device_id: "352122273468"
+      device_id: "335122270697"    # D405 (short range), left
     front_camera:
-      device_id: "037522250599"
+      device_id: "922612071156"    # D435 (wide FOV), front/top role.
+                                   # !! BLOCKER while on USB 2.1 !! This camera
+                                   # currently negotiates USB 2.1, and at 2.1 the
+                                   # D435 does NOT offer color 640x360 -- which is
+                                   # exactly what realsense_camera.py requests, so
+                                   # data collection dies with
+                                   #   RuntimeError: Couldn't resolve requests
+                                   # FIX: use a real USB 3 cable into a USB 3 port
+                                   # (avoid the ASMedia card at 05:00.0). Verify it
+                                   # reports 3.2, not 2.1, via view_cameras.py or
+                                   # the snippet in RUNBOOK.md.
     right_camera:
-      device_id: "352122272526"
+      device_id: "218622275075"    # D405 (short range), right
 
 # robot info
 robot:
   _target_: gello.robots.yam.YAMRobot
-  channel: can_leader_l
+  # This workstation exposes plain can0/can1 (no udev naming rules).
+  # can1 = LEFT arm -- VERIFIED 2026-09-02 by hand-moving the left arm with the
+  # motors de-energized and diffing joint positions on both buses: can1 shifted
+  # up to 0.046 rad on joints 1/5/6 while can0 stayed at its 0.0004 rad noise
+  # floor. (Agrees with /home/evan/carter/configs; that repo's STATUS.md claims
+  # the opposite mapping and is stale.)
+  channel: can1
 agent:
   _target_: gello.agents.gello_agent.GelloAgent
+  # VERIFIED 2026-09-02: this adapter enumerates here and answers at 57600 with
+  # Dynamixel IDs [1,2,3,4,5,6,7] -- exactly the joint_ids + gripper below, so
+  # this is the same GELLO build these values came from. No need to regenerate
+  # with scripts/generate_yam_config.py. Re-check with scripts/ping_gello.py.
   port: /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTAO9WPU-if00-port0
   dynamixel_config:
     _target_: gello.agents.gello_agent.DynamixelRobotConfig
@@ -37,10 +61,10 @@ collection:
 # Data storage configuration
 storage:
   episodes: 100
-  base_dir: "/home/kostas-lab/projects/YAM"
-  task_directory: "shirt"
-  language_instruction: 'Put the can into the basket'
-  teleop_device: "oculus" # ["oculus", "keyboard", "gello", "none"]
+  base_dir: "/home/evan/yam_data"
+  task_directory: "put_pen_in_bag"
+  language_instruction: "unzip the bag, pick up pens on the desk, put them into bag, zip the bag to close"
+  teleop_device: "gello" # ["oculus", "keyboard", "gello", "none"]
   save_format: "json" # ["json", "npy"]
   saver_max_workers: 2
   png_compress_level: 1
@@ -48,7 +72,14 @@ storage:
 
 # LeRobot conversion + upload pipeline
 lerobot:
-  auto_convert: true
+  # Collection-only on this workstation: conversion + training happen downstream,
+  # not here. Also NOTE this launcher shells the converter with sys.executable
+  # (launch_yaml_collect_data.py:273), which is the `yam` env -- and `yam` has NO
+  # lerobot (huggingface_hub 0.36 vs lerobot's >=1.0 requirement). Flipping
+  # auto_convert back to true here would fail with ModuleNotFoundError AFTER a
+  # full collection run. Whoever converts must do it in `yam_convert`:
+  #   /opt/conda/envs/yam_convert/bin/python molmoact_to_lerobot_v30.py
+  auto_convert: false
   auto_upload: false
   hf_repo_id: "williamtsai726/put_on_the_cap_0329"
   delete_local_after_upload: true
