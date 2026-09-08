@@ -143,27 +143,75 @@ class DataSaver:
         self._lock = threading.Lock()
 
         if os.path.exists(self.save_dir):
-            remove_dir = input(
-                f"The directory {self.save_dir} already exists. Do you want to remove it? (y/n): "
-            )
-            if remove_dir == "y":
-                shutil.rmtree(self.save_dir)
-                logger.info(f"Removed existing directory: {self.save_dir}.")
-            elif remove_dir == "n":
-                append_dir = input("Do you want to append to the existing directory? (y/n): ")
-                if append_dir == "y":
-                    self.traj_count = int(
-                        input("Enter the next episode number to append to the directory: ")
-                    )
-                    logger.info(
-                        f"Appending to existing directory: {self.save_dir} starting with episode number {self.traj_count}."
-                    )
-                else:
-                    raise FileExistsError(f"The directory {self.save_dir} already exists.")
-            else:
-                raise FileExistsError(f"The directory {self.save_dir} already exists.")
+            self.traj_count = self._resume_existing_dir()
 
         os.makedirs(self.save_dir, exist_ok=True)
+
+    # ------------------------------------------------------------- resume --
+
+    @staticmethod
+    def scan_episode_dirs(save_dir: str):
+        """Return (complete_indices, incomplete_dirs) for NNNNNN/ dirs under save_dir.
+
+        Complete = has a per-frame json AND meta.json (i.e. was saved with 'a').
+        Incomplete = frames from a run that crashed or was discarded mid-episode.
+        """
+        complete, incomplete = [], []
+        for name in sorted(os.listdir(save_dir)):
+            d = os.path.join(save_dir, name)
+            if not (os.path.isdir(d) and name.isdigit()):
+                continue
+            has_json = any(f.endswith(".json") and f != "meta.json" for f in os.listdir(d))
+            if has_json and os.path.exists(os.path.join(d, "meta.json")):
+                complete.append(int(name))
+            else:
+                incomplete.append(d)
+        return complete, incomplete
+
+    def _resume_existing_dir(self) -> int:
+        """Decide the next episode index for an existing directory.
+
+        The old prompt asked "remove? (y/n)" (where 'y' deleted real episodes) and
+        then for the next index by hand. The index is inferred instead: leftovers
+        from crashed runs are removed (they hold no per-frame json, so they are
+        not data), and Enter appends after the last complete episode. Deleting
+        everything requires typing the word.
+        """
+        complete, incomplete = self.scan_episode_dirs(self.save_dir)
+        for d in incomplete:
+            shutil.rmtree(d, ignore_errors=True)
+            logger.warning(f"Removed incomplete episode dir (no json/meta -- crashed or discarded run): {d}")
+        next_idx = (max(complete) + 1) if complete else 1
+        if not complete:
+            logger.info(f"{self.save_dir} exists but holds no complete episodes; starting at {next_idx:06d}.")
+            return next_idx
+        print(
+            f"\n{self.save_dir} already holds {len(complete)} complete episode(s), last = {max(complete):06d}."
+        )
+        while True:
+            ans = input(
+                f"  [Enter] append as {next_idx:06d}   |   type a number to start at that index   |   "
+                f"type 'delete' to remove ALL {len(complete)} episodes: "
+            ).strip()
+            if ans == "":
+                logger.info(f"Appending to {self.save_dir} starting at episode {next_idx:06d}.")
+                return next_idx
+            if ans.isdigit():
+                idx = int(ans)
+                if idx in complete:
+                    print(f"  {idx:06d} already exists and would be overwritten. Pick another, or Enter to append.")
+                    continue
+                logger.info(f"Appending to {self.save_dir} starting at episode {idx:06d}.")
+                return idx
+            if ans.lower() == "delete":
+                confirm = input(f"  Really delete {len(complete)} episodes in {self.save_dir}? type 'yes' to confirm: ").strip()
+                if confirm.lower() == "yes":
+                    shutil.rmtree(self.save_dir)
+                    logger.info(f"Removed existing directory: {self.save_dir}.")
+                    return 1
+                print("  Not deleted.")
+                continue
+            print("  Enter, a number, or 'delete'.")
 
     # ------------------------------------------------------------------ meta --
 

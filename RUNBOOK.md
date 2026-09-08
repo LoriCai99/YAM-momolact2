@@ -185,9 +185,11 @@ Episodes land in `/home/evan/yam_data/put_pen_in_bag/NNNNNN/`: per-frame JSON,
 launcher printed a `depth_scale` for every camera at startup and that
 `storage.save_depth` is true.
 
-**The "directory already exists — remove it? (y/n)" prompt:** on a first run the
-launcher creates the directory then flags its own handiwork; `y` is safe when it
-is empty. **Once you have real episodes, answer `n`** — `y` deletes them.
+**Resuming into an existing task directory:** the launcher counts the complete
+episodes, removes leftovers from crashed runs (dirs with frames but no JSON), and
+asks once — **Enter appends as the next index** (inferred, e.g. `000004`); a number
+starts at that index (existing ones are refused); typing `delete` then `yes` wipes
+the directory. There is no longer a `y/n` where `y` deletes real data.
 
 ---
 
