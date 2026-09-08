@@ -34,17 +34,21 @@ robot:
   channel: can1
 agent:
   _target_: gello.agents.gello_agent.GelloAgent
-  # VERIFIED 2026-09-02: this adapter enumerates here and answers at 57600 with
-  # Dynamixel IDs [1,2,3,4,5,6,7] -- exactly the joint_ids + gripper below, so
-  # this is the same GELLO build these values came from. No need to regenerate
-  # with scripts/generate_yam_config.py. Re-check with scripts/ping_gello.py.
-  port: /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTAO9WPU-if00-port0
+  # VERIFIED 2026-09-08 during teleop: FTAO9WCV is the leader on the operator's
+  # LEFT (it answers at 57600 with Dynamixel IDs [8..14]). The shipped configs
+  # had the two leaders crossed -- left leader drove the right follower.
+  # joint_ids / joint_signs / gripper_config belong to this leader's hardware
+  # and were swapped together with the port. Re-check with scripts/ping_gello.py.
+  port: /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTAO9WCV-if00-port0
   dynamixel_config:
     _target_: gello.agents.gello_agent.DynamixelRobotConfig
-    joint_ids: [1, 2, 3, 4, 5, 6]
+    joint_ids: [8, 9, 10, 11, 12, 13]
     joint_offsets: [3.14159, 3.14159, 3.14159, 3.14159, 3.14159, 3.14159]
-    joint_signs: [1.0, -1.0, -1.0, -1.0, 1.0, 1.0]
-    gripper_config: [7, 55.869140625, 108.369140625]
+    joint_signs: [1.0, -1.0, 1.0, -1.0, 1.0, 1.0]
+    # NOTE: this leader's trigger rests at ~113 deg, past the 108.37 closed bound
+    # below, so the gripper command saturates. Recalibrate with
+    #   python scripts/calibrate_gripper.py --side left
+    gripper_config: [14, 55.869140625, 108.369140625]
   start_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 hz: 30
 max_steps: 1000

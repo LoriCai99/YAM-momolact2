@@ -21,8 +21,8 @@ this file as machine-specific and re-derive them with the diagnostics in §6.
 | Conversion env | `yam_convert` (has `lerobot`; `yam` does not — see §7) |
 | Left arm | CAN **`can1`** |
 | Right arm | CAN **`can0`** |
-| Left GELLO | `FTAO9WPU` → Dynamixel IDs `1–7`, 57600 baud |
-| Right GELLO | `FTAO9WCV` → Dynamixel IDs `8–14`, 57600 baud |
+| Left GELLO | `FTAO9WCV` → Dynamixel IDs `8–14`, 57600 baud |
+| Right GELLO | `FTAO9WPU` → Dynamixel IDs `1–7`, 57600 baud |
 | Front/top camera | D435 `922612071156` |
 | Left camera | D405 `335122270697` |
 | Right camera | D405 `218622275075` |
@@ -57,9 +57,9 @@ for d in rs.context().query_devices():
 
 Teleop is unaffected — it never opens cameras.
 
-**② The right GELLO gripper is mis-calibrated.**
+**② The LEFT GELLO gripper (leader `FTAO9WCV`) is mis-calibrated.**
 It rests at 113.03°, past its configured closed bound of 108.37°, so the
-normalized command saturates above 1.0 and the right gripper sits pinned closed.
+normalized command saturates above 1.0 and that gripper sits pinned closed.
 Both configs shipped with *identical* `gripper_config` values copied from another
 workstation's GELLO build. Fix with §6.4. Its spring return is also mechanically
 weak — that part is not a software problem.
@@ -104,7 +104,7 @@ Then confirm all four subsystems answer:
 ```bash
 python i2rt/i2rt/motor_config_tool/ping_motors.py --channel can1   # expect [1..7]
 python i2rt/i2rt/motor_config_tool/ping_motors.py --channel can0   # expect [1..7]
-sg dialout -c "python gello_software/scripts/ping_gello.py"        # expect [1..7] and [8..14]
+python gello_software/scripts/ping_gello.py        # expect WCV=[8..14] (left), WPU=[1..7] (right)
 ```
 
 ---
@@ -197,7 +197,7 @@ Work the trigger through its full travel; it prints a `gripper_config` line to
 paste into the matching config.
 
 ```bash
-sg dialout -c "python scripts/calibrate_gripper.py --side right"
+python scripts/calibrate_gripper.py --side left
 ```
 
 ---
@@ -242,7 +242,7 @@ To convert manually:
 | A D405 vanishes from USB | ASMedia controller `05:00.0` dropping devices | `echo 1 \| sudo tee /sys/bus/pci/devices/0000:05:00.0/remove && echo 1 \| sudo tee /sys/bus/pci/rescan` |
 | Permission denied on `/dev/ttyUSB*` | `dialout` not active in this shell | `sg dialout -c "..."`, or log out and back in |
 | Session dies with `loss communication` | `enable_auto_recovery` defaults to False (fail-fast) | Restart. Already-saved episodes are intact |
-| Right gripper stuck closed | Gripper calibration saturating | §6.4 |
+| Left gripper stuck closed | Gripper calibration saturating (leader `FTAO9WCV`) | §6.4 |
 
 ---
 
