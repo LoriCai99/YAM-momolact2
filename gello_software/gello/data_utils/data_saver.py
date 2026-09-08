@@ -243,15 +243,22 @@ class DataSaver:
         logger.info(f"Reset buffer: {old_size} observations cleared.")
 
     def _discard(self, ep: _Episode) -> None:
+        # Indices are NEVER reused. Cleanup is asynchronous (an 8 GB episode dir is
+        # slow to rmtree and must not stall the loop between takes), so it can fire
+        # after the next episode has already started recording. When the index was
+        # reused, the next episode wrote to the SAME directory path and this stale
+        # rmtree deleted a just-saved episode -- the silent data loss seen on
+        # 2026-09-08. A monotonic index gives every episode its own directory, so a
+        # delayed cleanup can only ever remove the one it was created for. It also
+        # waits for that episode's own writes to drain first (they land in ep.dir),
+        # so no late write can recreate the directory after it is removed.
         ep.discarded = True
-        if ep.index == self.traj_count - 1:
-            self.traj_count -= 1  # reuse the index
 
         def _rm() -> None:
             ep.wait_writes()
             shutil.rmtree(ep.dir, ignore_errors=True)
             self._episodes.pop(ep.index, None)
-            logger.info(f"Discarded episode {ep.index} ({len(ep.records)} frames) and removed {ep.dir}")
+            logger.info(f"Discarded episode {ep.index} ({len(ep.records)} frames); removed {ep.dir}")
 
         self._pool.submit(_rm)
 

@@ -102,7 +102,7 @@ def test_data_saver_streams_depth_and_meta(tmp_path):
     assert meta["image_write_errors"] == []
 
 
-def test_data_saver_discard_removes_dir_and_reuses_index(tmp_path):
+def test_data_saver_discard_removes_dir_and_does_not_reuse_index(tmp_path):
     saver = DataSaver(save_dir=str(tmp_path), task_directory="raw", language_instruction="x", fps=30,
                       camera_meta=_camera_meta(), saver_max_workers=2)
     rng = np.random.default_rng(1)
@@ -113,7 +113,9 @@ def test_data_saver_discard_removes_dir_and_reuses_index(tmp_path):
     saver.reset_buffer()  # 'b': nothing was queued for saving -> discard
     saver.close()  # waits for the async rmtree
     assert not (tmp_path / "raw" / "000001").exists()
-    assert saver.traj_count == 1  # index reused for the next episode
+    # Index is NOT reused: the next episode is 000002, so a stale async cleanup of
+    # 000001 can never delete a live directory (2026-09-08 data-loss fix).
+    assert saver.traj_count == 2
 
 
 def test_convert_and_validate(tmp_path):
