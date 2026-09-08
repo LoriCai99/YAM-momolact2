@@ -1,51 +1,163 @@
-import concurrent
+"""Episode recorder for teleop data collection.
+
+Layout written per episode, under ``<save_dir>/<task_directory>/NNNNNN/``::
+
+    NNNNNN.json      per-frame records (legacy keys kept, see below)
+    meta.json        episode-level metadata: instruction, fps, per-camera
+                     intrinsics + depth scale + flex-pi role, timestamps
+    left_rgb/  front_rgb/  right_rgb/     000000.jpg|png   RGB, 8-bit
+    left_depth/ front_depth/ right_depth/ 000000.png       depth, 16-bit PNG in
+                                          NATIVE sensor units -- multiply by
+                                          meta.json cameras.<cam>.depth_scale_m_per_unit
+                                          for metres (D435: 1e-3, D405: 1e-4)
+
+Frames are written to disk *as they arrive* on a background pool, so an episode
+never has to fit in RAM (RGB + depth for three 640x360 cameras is ~2 MB/frame,
+i.e. 8+ GB for a two-minute episode at 30 Hz). The JSON/meta files are written
+when the episode is saved; a discarded episode's directory is deleted.
+
+Per-frame JSON keys are a superset of what the older MolmoAct-style saver wrote,
+so ``molmoact_to_lerobot_v30.py`` and the eval tooling keep working unchanged:
+``language_instruction``, ``left_joint``, ``right_joint``, ``next_left_joint``,
+``next_right_joint`` (stringified lists), ``image_<cam>_rgb``.
+New: ``frame_index``, ``timestamp`` (wall clock, s), ``camera_timestamps``,
+``image_<cam>_depth``. ``flexpi_convert.py`` consumes this layout.
+
+Control-loop contract (unchanged from the previous saver): ``add_observation``
+per step, ``save_episode_json(buffer)`` from ``EpisodeSaverThread`` on 'a',
+``reset_buffer()`` at the top of every episode (which is also the only signal
+that an unsaved episode was discarded with 'b').
+"""
+
+import concurrent.futures
 import json
 import logging
 import os
-from re import L
 import shutil
+import threading
 import time
-from PIL import Image
+from typing import Any, Dict, List, Optional
+
+import cv2
+import numpy as np
 
 logger = logging.getLogger("data_saver")
 logger.setLevel(logging.INFO)
+
+# Our camera name -> flex-pi camera key. Overridable via ``camera_roles``.
+DEFAULT_CAMERA_ROLES = {
+    "front": "cam_high",
+    "left": "cam_left_wrist",
+    "right": "cam_right_wrist",
+}
+JOINT_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"]
+# Warn (once per episode) when this many image writes are queued: the disk is
+# not keeping up with 30 Hz and RAM is starting to absorb the difference.
+_BACKLOG_WARN = 180
+
+
+def _to_list(x: Any) -> List[float]:
+    return [float(v) for v in np.asarray(x).reshape(-1)]
+
+
+class _Episode:
+    """Bookkeeping for one episode directory while it is being written."""
+
+    def __init__(self, index: int, root: str):
+        self.index = index
+        self.dir = os.path.join(root, f"{index:06d}")
+        self.records: List[Dict[str, Any]] = []
+        self.pending = 0  # image writes submitted but not finished
+        self._cv = threading.Condition()
+        self.started_at = time.time()
+        self.save_pending = False
+        self.saved = False
+        self.discarded = False
+        self.warned_backlog = False
+        self.write_errors: List[str] = []
+        os.makedirs(self.dir, exist_ok=True)
+
+    def submitted(self) -> None:
+        with self._cv:
+            self.pending += 1
+
+    def finished(self, error: Optional[str] = None) -> None:
+        with self._cv:
+            self.pending -= 1
+            if error:
+                self.write_errors.append(error)
+            if self.pending == 0:
+                self._cv.notify_all()
+
+    def wait_writes(self, timeout: Optional[float] = None) -> bool:
+        with self._cv:
+            return self._cv.wait_for(lambda: self.pending == 0, timeout=timeout)
 
 
 class DataSaver:
     def __init__(
         self,
-        save_dir="/home/sean/Desktop/YAM/gello_software/data",
-        task_directory="Testing_dir",
-        language_instruction="Test",
-        saver_max_workers=None,
-        png_compress_level=1,
+        save_dir: str = "/home/sean/Desktop/YAM/gello_software/data",
+        task_directory: str = "Testing_dir",
+        language_instruction: str = "Test",
+        saver_max_workers: Optional[int] = None,
+        png_compress_level: int = 1,
+        save_depth: bool = True,
+        image_format: str = "jpg",
+        jpeg_quality: int = 95,
+        fps: float = 30.0,
+        camera_roles: Optional[Dict[str, str]] = None,
+        camera_meta: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
-        self.save_dir = os.path.join(
-            save_dir,
-            task_directory
-        )
-
-        self.traj_count = 1 # number of actions saved
-        self.buffer = [] # buffer for a single action
+        self.save_dir = os.path.join(save_dir, task_directory)
         self.instruction = language_instruction
-        # Limit workers to avoid CPU spikes from the saver.
+        self.save_depth = bool(save_depth)
+        self.image_format = image_format.lower().lstrip(".")
+        if self.image_format not in ("jpg", "jpeg", "png"):
+            raise ValueError(f"image_format must be jpg or png, got {image_format!r}")
+        if self.image_format == "jpeg":
+            self.image_format = "jpg"
+        self.jpeg_quality = int(np.clip(jpeg_quality, 1, 100))
+        self.png_compress_level = int(np.clip(png_compress_level, 0, 9))
+        self.fps = float(fps)
+        self.camera_roles = dict(DEFAULT_CAMERA_ROLES)
+        if camera_roles:
+            self.camera_roles.update(camera_roles)
+        self.camera_meta: Dict[str, Dict[str, Any]] = {}
+        if camera_meta:
+            self.set_camera_meta(camera_meta)
+
+        # Writer pool. cv2.imencode releases the GIL, so threads parallelise.
         if saver_max_workers is None:
-            self.max_workers = max(1, min(4, (os.cpu_count() or 1)))
+            self.max_workers = max(2, min(8, (os.cpu_count() or 2) // 2))
         else:
             self.max_workers = max(1, int(saver_max_workers))
-        # Lower PNG compression is much faster (larger files, lower CPU).
-        self.png_compress_level = max(0, min(9, int(png_compress_level)))
+        self._pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.max_workers, thread_name_prefix="frame_writer"
+        )
+
+        self.traj_count = 1  # index the NEXT episode will get
+        self.buffer: List[Dict[str, Any]] = []  # records of the episode being recorded
+        self._episodes: Dict[int, _Episode] = {}
+        self._current: Optional[_Episode] = None
+        self._lock = threading.Lock()
 
         if os.path.exists(self.save_dir):
-            remove_dir = input(f"The directory {self.save_dir} already exists. Do you want to remove it? (y/n): ")
+            remove_dir = input(
+                f"The directory {self.save_dir} already exists. Do you want to remove it? (y/n): "
+            )
             if remove_dir == "y":
                 shutil.rmtree(self.save_dir)
                 logger.info(f"Removed existing directory: {self.save_dir}.")
             elif remove_dir == "n":
-                append_dir = input(f"Do you want to append to the existing directory? (y/n): ")
+                append_dir = input("Do you want to append to the existing directory? (y/n): ")
                 if append_dir == "y":
-                    self.traj_count = int(input(f"Enter the next episode number to append to the directory: "))
-                    logger.info(f"Appending to existing directory: {self.save_dir} starting with episode number {self.traj_count}.")
+                    self.traj_count = int(
+                        input("Enter the next episode number to append to the directory: ")
+                    )
+                    logger.info(
+                        f"Appending to existing directory: {self.save_dir} starting with episode number {self.traj_count}."
+                    )
                 else:
                     raise FileExistsError(f"The directory {self.save_dir} already exists.")
             else:
@@ -53,100 +165,225 @@ class DataSaver:
 
         os.makedirs(self.save_dir, exist_ok=True)
 
-    def reset_buffer(self):
+    # ------------------------------------------------------------------ meta --
+
+    def set_camera_meta(self, meta: Dict[str, Dict[str, Any]]) -> None:
+        """Accept ``RobotEnv.get_camera_meta()`` output, keyed ``<cam>_camera`` or ``<cam>``."""
+        for name, entry in (meta or {}).items():
+            cam = name[: -len("_camera")] if name.endswith("_camera") else name
+            self.camera_meta[cam] = dict(entry or {})
+
+    # --------------------------------------------------------------- episodes --
+
+    def _new_episode(self) -> _Episode:
+        ep = _Episode(self.traj_count, self.save_dir)
+        self.traj_count += 1
+        self._episodes[ep.index] = ep
+        self._current = ep
+        logger.info(f"Recording episode {ep.index} -> {ep.dir}")
+        return ep
+
+    def reset_buffer(self) -> None:
+        """Start a fresh episode. An unsaved, un-queued current episode is discarded."""
         old_size = len(self.buffer)
-        self.buffer = []
+        with self._lock:
+            ep = self._current
+            self._current = None
+            self.buffer = []
+        if ep is not None and not ep.save_pending and not ep.saved and not ep.discarded:
+            self._discard(ep)
         logger.info(f"Reset buffer: {old_size} observations cleared.")
 
-    def add_observation(self, obs):
-        obs_copy = {}
-        obs_copy['instruction'] = self.instruction
-        obs_copy['left_rgb'] = obs['left_camera_rgb']
-        obs_copy['right_rgb'] = obs['right_camera_rgb']
-        obs_copy['front_rgb'] = obs['front_camera_rgb']
-        obs_copy['joint'] = obs['joint_positions']
-        obs_copy['next_joint'] = obs['next_joint']
-        self.buffer.append(obs_copy)
+    def _discard(self, ep: _Episode) -> None:
+        ep.discarded = True
+        if ep.index == self.traj_count - 1:
+            self.traj_count -= 1  # reuse the index
 
-    def save_episode_json(self, buffer, pickle_only=False):
-        if not self.buffer:
-            logger.warning("Empty buffer, no observations to save.")
+        def _rm() -> None:
+            ep.wait_writes()
+            shutil.rmtree(ep.dir, ignore_errors=True)
+            self._episodes.pop(ep.index, None)
+            logger.info(f"Discarded episode {ep.index} ({len(ep.records)} frames) and removed {ep.dir}")
 
-        logger.info(f"Saving episode {self.traj_count} to {self.save_dir} with {len(buffer)} observations.")
-        if buffer == []:
+        self._pool.submit(_rm)
+
+    def mark_pending_save(self, buffer: List[Dict[str, Any]]) -> None:
+        """Called synchronously by EpisodeSaverThread.save_episode before queueing,
+        so the next reset_buffer() does not mistake the queued episode for a discard."""
+        ep = self._episode_for(buffer)
+        if ep is not None:
+            ep.save_pending = True
+
+    def _episode_for(self, buffer: List[Dict[str, Any]]) -> Optional[_Episode]:
+        if buffer:
+            return self._episodes.get(int(buffer[0].get("episode_index", -1)))
+        return self._current
+
+    # ------------------------------------------------------------------ frames --
+
+    def add_observation(self, obs: Dict[str, Any]) -> None:
+        with self._lock:
+            ep = self._current
+            if ep is None or ep.save_pending or ep.saved or ep.discarded:
+                ep = self._new_episode()
+        frame_idx = len(ep.records)
+
+        record: Dict[str, Any] = {
+            "episode_index": ep.index,
+            "frame_index": frame_idx,
+            "timestamp": time.time(),
+            "instruction": self.instruction,
+            "joint": _to_list(obs["joint_positions"]),
+            "next_joint": _to_list(obs["next_joint"]),
+            "camera_timestamps": {},
+            "images": {},
+        }
+
+        cams = [k[: -len("_camera_rgb")] for k in obs if k.endswith("_camera_rgb")]
+        for cam in sorted(cams):
+            rgb = obs[f"{cam}_camera_rgb"]
+            rgb_path = os.path.join(ep.dir, f"{cam}_rgb", f"{frame_idx:06d}.{self.image_format}")
+            record["images"][f"{cam}_rgb"] = rgb_path
+            self._submit(ep, self._write_rgb, np.ascontiguousarray(rgb), rgb_path)
+
+            depth = obs.get(f"{cam}_camera_depth") if self.save_depth else None
+            if depth is not None:
+                depth_path = os.path.join(ep.dir, f"{cam}_depth", f"{frame_idx:06d}.png")
+                record["images"][f"{cam}_depth"] = depth_path
+                self._submit(ep, self._write_depth, np.ascontiguousarray(depth), depth_path)
+
+            ts = obs.get(f"{cam}_camera_timestamp")
+            if ts is not None:
+                record["camera_timestamps"][cam] = float(ts)
+
+        ep.records.append(record)
+        self.buffer.append(record)
+
+        if ep.pending > _BACKLOG_WARN and not ep.warned_backlog:
+            ep.warned_backlog = True
+            logger.warning(
+                f"Episode {ep.index}: {ep.pending} image writes queued -- disk is not keeping up "
+                f"with {self.fps:.0f} Hz. Consider image_format=jpg or fewer/faster cameras."
+            )
+
+    def _submit(self, ep: _Episode, fn, *args) -> None:
+        ep.submitted()
+        fut = self._pool.submit(fn, *args)
+
+        def _done(f, ep=ep):
+            exc = f.exception()
+            ep.finished(None if exc is None else repr(exc))
+
+        fut.add_done_callback(_done)
+
+    def _write_rgb(self, rgb: np.ndarray, path: str) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        if self.image_format == "png":
+            ok = cv2.imwrite(path, bgr, [cv2.IMWRITE_PNG_COMPRESSION, self.png_compress_level])
+        else:
+            ok = cv2.imwrite(path, bgr, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
+        if not ok:
+            raise IOError(f"cv2.imwrite failed: {path}")
+
+    def _write_depth(self, depth: np.ndarray, path: str) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        d = np.asarray(depth)
+        if d.ndim == 3:
+            d = d[:, :, 0]
+        if d.dtype != np.uint16:
+            d = np.clip(np.rint(d), 0, 65535).astype(np.uint16)
+        ok = cv2.imwrite(path, d, [cv2.IMWRITE_PNG_COMPRESSION, self.png_compress_level])
+        if not ok:
+            raise IOError(f"cv2.imwrite failed: {path}")
+
+    # kept for callers that used the old API
+    def save_image(self, image: np.ndarray, path: str) -> None:
+        self._write_rgb(np.asarray(image), path)
+
+    # ---------------------------------------------------------------- finalise --
+
+    def save_episode_json(self, buffer: List[Dict[str, Any]], pickle_only: bool = False) -> None:
+        if not buffer:
             logger.warning("Empty buffer, no observations to save.")
             return
+        ep = self._episode_for(buffer)
+        if ep is None:
+            logger.error("save_episode_json: no episode matches the buffer; nothing written")
+            return
+        ep.save_pending = True
+        logger.info(f"Saving episode {ep.index} to {ep.dir} with {len(ep.records)} observations.")
+        ep.wait_writes()
+        if ep.write_errors:
+            logger.error(
+                f"Episode {ep.index}: {len(ep.write_errors)} image writes FAILED, e.g. {ep.write_errors[0]}"
+            )
 
-        img_paths = {}
-        task_name = self.instruction
-        joints = [obs["joint"] for obs in buffer]
-        next_joints = [obs["next_joint"] for obs in buffer]
+        records = ep.records
+        json_data = []
+        for r in records:
+            j, nj = r["joint"], r["next_joint"]
+            row = {
+                "language_instruction": r["instruction"],
+                "frame_index": r["frame_index"],
+                "timestamp": r["timestamp"],
+                "left_joint": str(j[:7]),
+                "right_joint": str(j[7:]),
+                "next_left_joint": str(nj[:7]),
+                "next_right_joint": str(nj[7:]),
+                "camera_timestamps": r["camera_timestamps"],
+            }
+            for key, path in r["images"].items():
+                row[f"image_{key}"] = path
+            json_data.append(row)
 
-        if not pickle_only:
-            # save rgb from camera
-            rgb_keys = [key for key in buffer[0].keys() if "rgb" in key]
-            rgb_keys.sort()  # Sort from smallest to largest
-            # logger.info(f"Found {len(rgb_keys)} RGB cameras: {rgb_keys}")
+        json_path = os.path.join(ep.dir, f"{ep.index:06d}.json")
+        with open(json_path, "w") as f:
+            json.dump(json_data, f, indent=4)
 
-            for key in rgb_keys:
-                save_dir = os.path.join(self.save_dir, f'{self.traj_count:06d}')
-                os.makedirs(save_dir, exist_ok=True)
+        meta = self._episode_meta(ep, records)
+        with open(os.path.join(ep.dir, "meta.json"), "w") as f:
+            json.dump(meta, f, indent=2)
 
-                save_dir = os.path.join(save_dir, key)
+        ep.saved = True
+        logger.info(
+            f"Complete!!!! Saved episode {ep.index} to {ep.dir} with {len(records)} observations "
+            f"({meta['duration_s']:.1f}s, {meta['effective_fps']:.1f} fps effective)."
+        )
 
-                os.makedirs(save_dir, exist_ok=True)
-                # logger.info(f"Created directory for camera {key}: {save_dir}")
+    def _episode_meta(self, ep: _Episode, records: List[Dict[str, Any]]) -> Dict[str, Any]:
+        cams = sorted({k[: -len("_rgb")] for r in records for k in r["images"] if k.endswith("_rgb")})
+        t0, t1 = records[0]["timestamp"], records[-1]["timestamp"]
+        duration = max(t1 - t0, 0.0)
+        cameras: Dict[str, Any] = {}
+        for cam in cams:
+            entry = dict(self.camera_meta.get(cam, {}))
+            entry["role"] = self.camera_roles.get(cam, cam)
+            entry["rgb_dir"] = f"{cam}_rgb"
+            entry["rgb_format"] = self.image_format
+            if any(f"{cam}_depth" in r["images"] for r in records):
+                entry["depth_dir"] = f"{cam}_depth"
+                entry["depth_format"] = "png16_native_units"
+            intr = entry.get("intrinsics") or {}
+            entry.setdefault("width", intr.get("width"))
+            entry.setdefault("height", intr.get("height"))
+            cameras[cam] = entry
+        return {
+            "format": "gello_data_saver/2",
+            "episode_index": ep.index,
+            "instruction": self.instruction,
+            "fps": self.fps,
+            "num_frames": len(records),
+            "started_at": ep.started_at,
+            "saved_at": time.time(),
+            "duration_s": duration,
+            "effective_fps": (len(records) - 1) / duration if duration > 0 and len(records) > 1 else 0.0,
+            "cameras": cameras,
+            "joint_layout": {"left": JOINT_NAMES, "right": JOINT_NAMES},
+            "joint_units": "rad (arm joints), gripper in i2rt command space [0, 1], 1 = open",
+            "action_semantics": "next_joint = follower joint positions after applying the leader command at this step",
+            "image_write_errors": ep.write_errors,
+        }
 
-                paths = []
-                tasks = []
-
-                with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                    for i, obs in enumerate(buffer):
-                        img = obs[key]
-                        img_path = os.path.join(save_dir, f'{i:06d}.png')
-                        tasks.append(executor.submit(self.save_image, img, img_path))
-                        paths.append(img_path)
-
-                    # Wait for all parallel tasks to complete
-                    concurrent.futures.wait(tasks)
-                    img_paths.setdefault(key, []).extend(paths)
-                    # logger.info(f"Saved {len(paths)} images for camera {key}")
-
-            # add action and delta to json
-            # note that raw action is the joint returned by the viser ik, while the other joint is from robot obs
-            json_data = []
-            for i in range(len(joints)):
-                json_data_obs = {
-                    'language_instruction': task_name,
-                    'left_joint': str(joints[i][:7].tolist()),
-                    'right_joint': str(joints[i][7:].tolist()),
-                    'next_left_joint': str(next_joints[i][:7].tolist()),
-                    'next_right_joint': str(next_joints[i][7:].tolist())
-                }
-
-                # add image paths to json
-                for j, rgb_key in enumerate(rgb_keys):
-                    json_data_obs[f"image_{rgb_key}"] = img_paths[rgb_key][i]
-
-                json_data.append(json_data_obs)
-
-            json_save_path = os.path.join(self.save_dir, f'{self.traj_count:06d}', f'{self.traj_count:06d}.json')
-            os.makedirs(os.path.dirname(json_save_path), exist_ok=True)
-
-            if not os.path.exists(json_save_path):
-                with open(json_save_path, 'w') as f:
-                    json.dump(json_data, f, indent=4)
-                # logger.info(f"Created new JSON file: with {len(json_data)} observations.")
-            else:
-                with open(json_save_path, 'r') as f:
-                    existing_data = json.load(f)
-                existing_data.extend(json_data)
-                with open(json_save_path, 'w') as f:
-                    json.dump(existing_data, f, indent=4)
-                logger.info(f"Added {len(json_data)} observations to {json_save_path}")
-        # Just to let user know that the episode is saved
-        logger.info(f"Complete!!!! Saved episode {self.traj_count} to {self.save_dir} with {len(buffer)} observations.")
-        self.traj_count += 1
-
-    def save_image(self, image, path):
-        Image.fromarray(image).save(path, compress_level=self.png_compress_level)
+    def close(self) -> None:
+        self._pool.shutdown(wait=True)

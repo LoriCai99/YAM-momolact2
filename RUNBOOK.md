@@ -159,7 +159,11 @@ colour pad window** (not the terminal — this catches everyone out):
 | `a` | end and **save** |
 | `b` | end and **discard** |
 
-Episodes land in `/home/evan/yam_data/put_pen_in_bag/` as JSON.
+Episodes land in `/home/evan/yam_data/put_pen_in_bag/NNNNNN/`: per-frame JSON,
+`meta.json` (intrinsics, depth scale, roles), `*_rgb/` JPEG q95 and `*_depth/`
+16-bit PNG for all three cameras. Depth is **required** by flex-pi — check that the
+launcher printed a `depth_scale` for every camera at startup and that
+`storage.save_depth` is true.
 
 **The "directory already exists — remove it? (y/n)" prompt:** on a first run the
 launcher creates the directory then flags its own handiwork; `y` is safe when it
@@ -202,38 +206,34 @@ python scripts/calibrate_gripper.py --side left
 
 ---
 
-## 7. Downstream: conversion is NOT done on this box
+## 7. Conversion to the flex-pi format
 
-`auto_convert` and `auto_upload` are **false** by design. Raw JSON is the
-deliverable; conversion and training happen elsewhere.
-
-This is not merely a preference — it cannot run in the `yam` env:
-
-| Env | `lerobot` | `huggingface_hub` |
-|---|---|---|
-| `yam` (runs collection) | ✗ absent | 0.36.2 (pinned <1.0 by `transformers` 4.57) |
-| `yam_convert` | ✓ 0.5.2 | 1.27.0 (lerobot needs ≥1.0) |
-
-`launch_yaml_collect_data.py:273` shells the converter with `sys.executable` —
-the `yam` interpreter. Setting `auto_convert: true` would run a **full
-collection session** and then fail at the very end with
-`ModuleNotFoundError: No module named 'lerobot.datasets'`. Raw JSON survives, but
-you would have wasted the session's tail.
-
-To convert manually:
+Raw episodes are converted **here**, in the `yam` env, with no lerobot dependency
+(`docs/FLEXPI_DATA_SPEC.md` has the full spec and the reasoning):
 
 ```bash
-/opt/conda/envs/yam_convert/bin/python molmoact_to_lerobot_v30.py \
-    --data_dir /home/evan/yam_data/put_pen_in_bag \
-    --output_dir /home/evan/yam_data/put_pen_in_bag_lerobot_v30
+cd "/home/evan/Lori-momolact2 setup/YAM-momolact2"
+conda activate yam
+python flexpi_convert.py                        # reads storage:/flexpi: from configs/yam_left.yaml
+python gello_software/scripts/validate_flexpi_dataset.py /home/evan/yam_data/put_pen_in_bag_flexpi_v21
 ```
 
----
+Output is LeRobot **v2.1** in exactly the layout of `flex-pi/soft_bag_zipping`:
+640×360 h264 RGB + FFV1 uint16-mm depth for `cam_high`/`cam_left_wrist`/
+`cam_right_wrist`, 32-D end-effector state/action (FK via i2rt), intrinsics.
+The validator must print **PASS** before data is handed to the training team.
+
+The older `molmoact_to_lerobot_v30.py` (v3.0, RGB only, 14-D joints) still works
+on the same raw episodes but needs the `yam_convert` env; it is not what flex-pi
+consumes. `lerobot.auto_convert` stays false.
 
 ## 8. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| Converter: `no depth_scale_m_per_unit for <cam>` | Episode has no `meta.json` (recorded before the depth rewrite) | `--depth_scale front=0.001 --depth_scale left=0.0001 --depth_scale right=0.0001` (D435 = 1 mm, D405 = 0.1 mm per unit) |
+| Converter: `has no depth frames` | Collected with `storage.save_depth: false` | Recollect; flex-pi needs depth |
+| Validator FAIL on `feature ...` | info.json drifted from the reference | Don't hand-edit info.json; rerun `flexpi_convert.py` |
 | `online motors: []` on both buses | CAN interfaces went DOWN after a USB re-enumeration | `sudo bash i2rt/scripts/reset_all_can.sh`. Confirm with `cansend can1 001#11` → `Network is down` |
 | `cansend` → `No buffer space available` | No node is ACKing: arms genuinely unpowered or unplugged. TX queue wedges | Power the arms, then reset CAN to clear the wedge |
 | **Teleop hangs, no output** | `driver.py:509` spins on `while self._joint_angles is None` with no timeout. A non-responding servo only prints `Failed to set torque mode…` then blocks forever | `scripts/ping_gello.py`. Silence at every baudrate ⇒ the Dynamixel **power rail** is off (USB enumeration proves nothing — the U2D2 is bus-powered) |

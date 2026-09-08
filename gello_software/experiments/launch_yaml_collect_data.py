@@ -363,12 +363,19 @@ def main():
         right_cfg = update_offsets(right_cfg)
 
     # Initialize data saver and keyboard interface
+    storage_cfg = left_cfg["storage"]
     data_saver = DataSaver(
-        save_dir=left_cfg["storage"]["base_dir"],
-        task_directory=left_cfg["storage"]["task_directory"],
-        language_instruction=left_cfg["storage"]["language_instruction"],
-        saver_max_workers=left_cfg["storage"].get("saver_max_workers"),
-        png_compress_level=left_cfg["storage"].get("png_compress_level", 1),
+        save_dir=storage_cfg["base_dir"],
+        task_directory=storage_cfg["task_directory"],
+        language_instruction=storage_cfg["language_instruction"],
+        saver_max_workers=storage_cfg.get("saver_max_workers"),
+        png_compress_level=storage_cfg.get("png_compress_level", 1),
+        # flex-pi needs synchronised depth; the old saver silently dropped it.
+        save_depth=storage_cfg.get("save_depth", True),
+        image_format=storage_cfg.get("image_format", "jpg"),
+        jpeg_quality=storage_cfg.get("jpeg_quality", 95),
+        fps=left_cfg.get("hz", 30),
+        camera_roles=(left_cfg.get("flexpi") or {}).get("camera_map"),
     )
     kb_interface = KBReset()
 
@@ -470,6 +477,15 @@ def main():
         robot_client = ZMQClientRobot(port=hardware_port, host=hardware_host)
 
     env = RobotEnv(robot_client, control_rate_hz=cfg.get("hz", 30), camera_dict=cameras)
+    # Intrinsics + depth scale per camera go into every episode's meta.json.
+    data_saver.set_camera_meta(env.get_camera_meta())
+    for _cam, _m in env.get_camera_meta().items():
+        _i = _m.get("intrinsics") or {}
+        print(
+            f"camera {_cam}: serial={_m.get('device_id')} "
+            f"{_i.get('width')}x{_i.get('height')} fx={_i.get('fx', float('nan')):.1f} "
+            f"depth_scale={_m.get('depth_scale_m_per_unit')} m/unit"
+        )
 
     # Store global variables for cleanup
     global _env, _bimanual, _left_cfg, _right_cfg

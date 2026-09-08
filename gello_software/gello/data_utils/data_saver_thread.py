@@ -33,6 +33,11 @@ class EpisodeSaverThread(threading.Thread):
         """
         Put episode data in the queue for background saving.
         """
+        # Flag the episode as queued BEFORE the control loop can call reset_buffer(),
+        # otherwise the saver would treat it as discarded and delete its frames.
+        mark = getattr(self.data_saver, "mark_pending_save", None)
+        if callable(mark):
+            mark(episode_data)
         self.episode_queue.put(episode_data)
 
     def stop(self):

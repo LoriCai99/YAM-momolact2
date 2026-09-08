@@ -98,6 +98,23 @@ Written while bringing this workstation up; all live in `gello_software/scripts/
 - **`DynamixelDriver` can deadlock on sudo.** `_fix_port_permissions()` shells `sudo chmod 666` with `capture_output=True`, so it blocks forever on the password prompt. Also `use_fake_fallback=True` is the default, so some failure paths silently substitute a fake leader stuck at zeros.
 - **`online motors: []` usually means the CAN interface went down, not dead arms.** A USB re-enumeration leaves `can0`/`can1` DOWN; `cansend can1 001#11` then reports `Network is down`. Fix with `bash i2rt/scripts/reset_all_can.sh` — run it immediately before every launch. Distinguish from unpowered arms: unpowered gives `No buffer space available` (nothing ACKs, TX queue wedges) rather than `Network is down`.
 
+## flex-pi data pipeline (added 2026-09-08)
+
+The team finetunes **flex-pi** (`flex-pi/soft_bag_zipping` is literally this task). Read
+`docs/FLEXPI_DATA_SPEC.md` before touching collection or conversion. Summary:
+
+- Target is LeRobot **v2.1** with a `depth_video` extension, 32-D EE state (FK, rot6d =
+  first two rows), 640×360, 30 fps, keys `cam_high/cam_left_wrist/cam_right_wrist`.
+- `gello/data_utils/data_saver.py` is a streaming recorder: frames go to disk as they
+  arrive; **depth (16-bit PNG, native units) and per-camera intrinsics/depth-scale are
+  recorded** (`meta.json`). The pre-rewrite saver silently dropped depth at `env.py`.
+  D405 depth is 0.1 mm/unit, D435 1 mm/unit — never assume.
+- `flexpi_convert.py` (repo root, `yam` env, no lerobot) writes the v2.1 layout with
+  pyarrow + PyAV; `scripts/validate_flexpi_dataset.py` diffs it against the cached
+  reference `docs/flexpi/soft_bag_zipping.info.json`. `tests/test_flexpi_pipeline.py`
+  runs the whole chain on synthetic frames.
+- EE convention verified against their frame 0: gripper model + `grasp_site`.
+
 ## Tests
 
 `gello_software/tests/` has pytest coverage for the camera server (`_snapshot`, `_maybe_heartbeat`, end-to-end REQ/REP wire protocol, stale-frame detection) and the MolmoAct eval launcher (`dynamic_smoothing`, `_park_robot`, `_convert_if_any`, `run_one_rollout`). All tests use inline fakes — no RealSense / no CAN motors required.

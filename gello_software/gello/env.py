@@ -118,11 +118,44 @@ class RobotEnv:
                 observations[f"{name}_rgb"] = image
         else:
             for name, camera in self._camera_dict.items():
-                image, _depth = camera.read()
+                image, depth = camera.read()
                 observations[f"{name}_rgb"] = image
+                # Depth is already captured (and aligned to colour) by the driver;
+                # keep it so data collection can record it. (H, W, 1) uint16, native
+                # sensor units -- see get_camera_meta() for metres-per-unit.
+                observations[f"{name}_depth"] = depth
+                ts = getattr(camera, "last_frame_timestamp", None)
+                if ts is not None:
+                    observations[f"{name}_timestamp"] = ts
 
         observations.update(self.get_robot_state())
         return observations
+
+    def get_camera_meta(self) -> Dict[str, Dict[str, Any]]:
+        """Static per-camera metadata (intrinsics, depth scale, serial).
+
+        Keyed like ``camera_dict`` (e.g. ``"left_camera"``). Drivers that do not
+        expose a field simply omit it, so this works with dummy/saved cameras too.
+        """
+        meta: Dict[str, Dict[str, Any]] = {}
+        for name, camera in self._camera_dict.items():
+            entry: Dict[str, Any] = {}
+            for attr, key in (
+                ("get_intrinsics", "intrinsics"),
+                ("get_depth_scale", "depth_scale_m_per_unit"),
+            ):
+                fn = getattr(camera, attr, None)
+                if callable(fn):
+                    try:
+                        entry[key] = fn()
+                    except Exception as exc:  # pragma: no cover - driver specific
+                        entry[key] = None
+                        entry.setdefault("errors", []).append(f"{attr}: {exc}")
+            device_id = getattr(camera, "device_id", None)
+            if device_id is not None:
+                entry["device_id"] = device_id
+            meta[name] = entry
+        return meta
 
 
 def main() -> None:

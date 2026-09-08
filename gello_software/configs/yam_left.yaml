@@ -67,12 +67,18 @@ storage:
   episodes: 100
   base_dir: "/home/evan/yam_data"
   task_directory: "put_pen_in_bag"
-  language_instruction: "unzip the bag, pick up pens on the desk, put them into bag, zip the bag to close"
+  # EXACT string flex-pi/soft_bag_zipping was trained with (meta/tasks.jsonl).
+  # The language encoder learned these tokens; keep it verbatim for finetuning.
+  language_instruction: "Unzip the bag, pick up the pens from the table one at a time and place them inside, then zip the bag closed."
   teleop_device: "gello" # ["oculus", "keyboard", "gello", "none"]
   save_format: "json" # ["json", "npy"]
-  saver_max_workers: 2
+  saver_max_workers: 4
   png_compress_level: 1
   old_format: false
+  # --- flex-pi requirements (docs/FLEXPI_DATA_SPEC.md) ---
+  save_depth: true          # 16-bit PNG per frame per camera, native sensor units
+  image_format: "jpg"       # raw RGB. jpg q95 is ~5x smaller than png and the
+  jpeg_quality: 95          # target dataset is h264 (far lossier) anyway; "png" if you insist
 
 # LeRobot conversion + upload pipeline
 lerobot:
@@ -96,6 +102,23 @@ lerobot:
   image_writer_threads: 8
   parallel_encoding: true
   sanitize_online_viz_meta: true
+
+# Raw episodes -> LeRobot v2.1 in the exact flex-pi/soft_bag_zipping layout.
+# Run:  python flexpi_convert.py            (reads this block; CLI flags override)
+# then: python gello_software/scripts/validate_flexpi_dataset.py <output_dir>
+flexpi:
+  output_dir: "/home/evan/yam_data/put_pen_in_bag_flexpi_v21"
+  camera_map: {front: cam_high, left: cam_left_wrist, right: cam_right_wrist}
+  robot_type: "yam"
+  # End-effector frame for the 32-D state: i2rt YAM model WITH the LINEAR_4310
+  # gripper, site "grasp_site" (fingertip TCP), expressed in each arm's base
+  # frame. Verified against flex-pi frame 0: their home pose reads
+  # [0.2477, 0.0001, 0.1708] m; this model at q=0 gives [0.245, 0.000, 0.174].
+  ee_model: "gripper"       # gripper | arm
+  ee_site: "grasp_site"     # grasp_site | tcp_site
+  action_mode: "next_joint_fields"
+  rgb_crf: 20               # libx264 quality for the mp4s (reference is h264 yuv420p)
+  workers: 8
 
 # Policy configuration
 policy:

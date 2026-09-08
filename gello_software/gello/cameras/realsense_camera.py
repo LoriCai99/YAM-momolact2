@@ -47,6 +47,8 @@ class RealSenseCamera(CameraDriver):
         self._frame_ready = threading.Event()
         self._stop_event = threading.Event()
         self._capture_thread = None
+        self._intrinsics = None
+        self._depth_scale = None
 
         self._rs = rs
         self._pipeline = None
@@ -117,10 +119,86 @@ class RealSenseCamera(CameraDriver):
             self._config.enable_stream(rs.stream.depth, 640, 360, rs.format.z16, 30)
             self._config.enable_stream(rs.stream.color, 640, 360, rs.format.bgr8, 30)
 
-            self._pipeline.start(self._config)
+            profile = self._pipeline.start(self._config)
+            self._cache_stream_meta(profile)
 
             for _ in range(self._warmup_frames):
                 self._pipeline.wait_for_frames()
+
+    def _cache_stream_meta(self, profile) -> None:
+        """Record intrinsics + depth scale once per pipeline start.
+
+        Depth is aligned to the colour stream in ``_capture_loop`` (``rs.align``),
+        so the colour intrinsics describe both images -- one K per camera, which is
+        what a flex-pi ``camera_intrinsics.json`` expects. Cached here (inside the
+        pipeline lock) so callers never touch the pipeline from another thread.
+        """
+        rs = self._rs
+        try:
+            vs = profile.get_stream(rs.stream.color).as_video_stream_profile()
+            i = vs.get_intrinsics()
+            self._intrinsics = {
+                "fx": float(i.fx), "fy": float(i.fy), "cx": float(i.ppx), "cy": float(i.ppy),
+                "width": int(i.width), "height": int(i.height),
+                "model": str(i.model).split(".")[-1], "coeffs": [float(c) for c in i.coeffs],
+            }
+        except Exception as exc:  # keep capturing even if a driver lacks intrinsics
+            logger.warning(f"{self}: could not read colour intrinsics: {exc}")
+            self._intrinsics = None
+        try:
+            sensor = profile.get_device().first_depth_sensor()
+            # metres per raw uint16 unit. D435: 0.001 (1 mm). D405: 0.0001 (0.1 mm)!
+            self._depth_scale = float(sensor.get_depth_scale())
+        except Exception as exc:
+            logger.warning(f"{self}: could not read depth scale: {exc}")
+            self._depth_scale = None
+
+    def close(self) -> None:
+        """Stop the capture thread and the pipeline.
+
+        Without this, interpreter exit tears librealsense down underneath a
+        still-running capture thread and aborts with
+        "terminate called without an active exception" (core dump). Harmless for
+        saved data, alarming in a terminal, so call it from cleanup paths.
+        """
+        self._stop_event.set()
+        t = self._capture_thread
+        if t is not None and t.is_alive() and t is not threading.current_thread():
+            t.join(timeout=3.0)
+        with self._lock:
+            if self._pipeline is not None:
+                try:
+                    self._pipeline.stop()
+                except Exception:
+                    pass
+                self._pipeline = None
+
+    # ---- metadata accessors used by RobotEnv.get_camera_meta() ---------------
+
+    @property
+    def device_id(self) -> Optional[str]:
+        return self._device_id
+
+    @property
+    def last_frame_timestamp(self) -> Optional[float]:
+        """Wall-clock time (s) at which the frame returned by the next ``read()`` was captured."""
+        with self._frame_lock:
+            return self._latest_frame_timestamp
+
+    def get_depth_scale(self) -> Optional[float]:
+        """Metres per depth unit for this device (see ``_cache_stream_meta``)."""
+        return getattr(self, "_depth_scale", None)
+
+    def get_intrinsics(self) -> Optional[dict]:
+        """Pinhole intrinsics of the frames ``read()`` returns (accounts for ``flip``)."""
+        intr = getattr(self, "_intrinsics", None)
+        if intr is None:
+            return None
+        intr = dict(intr)
+        if self._flip:  # 180-degree rotation mirrors the principal point
+            intr["cx"] = (intr["width"] - 1) - intr["cx"]
+            intr["cy"] = (intr["height"] - 1) - intr["cy"]
+        return intr
 
     def read(
         self,
