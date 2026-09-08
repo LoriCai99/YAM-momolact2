@@ -687,8 +687,6 @@ def main():
     _kb_interface = kb_interface
 
     # Move robot to start_joints position if specified in config
-    from gello.utils.launch_utils import move_to_start_position
-
     if bimanual:
         move_to_start_position(env, bimanual, left_cfg, right_cfg)
     else:
