@@ -56,16 +56,31 @@ def check_stream_support(serial: str, width: int = STREAM_WIDTH, height: int = S
     return out
 
 
-def get_device_ids() -> List[str]:
+def list_device_ids() -> List[str]:
+    """Serial numbers of connected RealSense devices. No hardware reset."""
+    import pyrealsense2 as rs
+
+    return [d.get_info(rs.camera_info.serial_number) for d in rs.context().query_devices()]
+
+
+def get_device_ids(reset: bool = True) -> List[str]:
+    """List connected RealSense serials, optionally hardware-resetting each first.
+
+    IMPORTANT: hardware_reset() drops every device off the USB bus for ~2 s while
+    it re-enumerates. Doing it twice in quick succession (e.g. once in the launcher
+    and again in the camera-server child) has raced and left a camera disconnected
+    (2026-09-08). Reset AT MOST ONCE per launch; pass reset=False everywhere else.
+    """
     import pyrealsense2 as rs
 
     ctx = rs.context()
-    devices = ctx.query_devices()
     device_ids = []
-    for dev in devices:
-        dev.hardware_reset()
+    for dev in ctx.query_devices():
+        if reset:
+            dev.hardware_reset()
         device_ids.append(dev.get_info(rs.camera_info.serial_number))
-    time.sleep(2)
+    if reset:
+        time.sleep(2)
     return device_ids
 
 
@@ -166,11 +181,32 @@ class RealSenseCamera(CameraDriver):
             self._config.enable_stream(rs.stream.depth, STREAM_WIDTH, STREAM_HEIGHT, rs.format.z16, STREAM_FPS)
             self._config.enable_stream(rs.stream.color, STREAM_WIDTH, STREAM_HEIGHT, rs.format.bgr8, STREAM_FPS)
 
-            profile = self._pipeline.start(self._config)
-            self._cache_stream_meta(profile)
-
-            for _ in range(self._warmup_frames):
-                self._pipeline.wait_for_frames()
+            # A device may still be re-enumerating (e.g. just after a hardware reset):
+            # "Device disconnected"/"No device connected" here is usually transient.
+            # Retry a few times before giving up, so a brief USB blip does not kill
+            # the whole camera server.
+            last_exc = None
+            for attempt in range(1, 6):
+                try:
+                    profile = self._pipeline.start(self._config)
+                    self._cache_stream_meta(profile)
+                    for _ in range(self._warmup_frames):
+                        self._pipeline.wait_for_frames()
+                    break
+                except RuntimeError as exc:
+                    msg = str(exc)
+                    if "resolve requests" in msg:
+                        raise  # a mode/USB-link problem: retrying will not help
+                    last_exc = exc
+                    logger.warning(
+                        "camera %s start attempt %d/5 failed (%s); retrying",
+                        self._device_id, attempt, msg.splitlines()[0][:80],
+                    )
+                    time.sleep(1.5)
+            else:
+                raise RuntimeError(
+                    f"camera {self._device_id}: pipeline did not start after 5 attempts: {last_exc}"
+                )
 
     def _cache_stream_meta(self, profile) -> None:
         """Record intrinsics + depth scale once per pipeline start.

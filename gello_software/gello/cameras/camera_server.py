@@ -45,7 +45,7 @@ import numpy as np
 import zmq
 from omegaconf import OmegaConf
 
-from gello.cameras.realsense_camera import RealSenseCamera, get_device_ids
+from gello.cameras.realsense_camera import RealSenseCamera, list_device_ids
 
 
 logger = logging.getLogger("camera_server")
@@ -310,8 +310,8 @@ class CameraServer:
 def _build_cameras_from_config(cfg_path: Path) -> Dict[str, RealSenseCamera]:
     cfg = OmegaConf.to_container(OmegaConf.load(cfg_path), resolve=True)
     camera_cfg = cfg["sensors"]["cameras"]
-    logger.info("Discovering RealSense devices...")
-    ids = get_device_ids()
+    logger.info("Discovering RealSense devices (no reset -- the launcher already reset them)...")
+    ids = list_device_ids()
     logger.info("Found %d RealSense devices: %s", len(ids), ids)
     cameras: Dict[str, RealSenseCamera] = {}
     for name, spec in camera_cfg.items():
