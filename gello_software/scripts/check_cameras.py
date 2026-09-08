@@ -15,6 +15,7 @@ Usage:  python scripts/check_cameras.py
 """
 
 import sys
+import time
 
 import pyrealsense2 as rs
 from omegaconf import OmegaConf
@@ -25,7 +26,21 @@ REQ_W, REQ_H, REQ_FPS = 640, 360, 30
 def main() -> None:
     cfg = OmegaConf.to_container(OmegaConf.load("configs/yam_left.yaml"), resolve=True)
     cams = cfg["sensors"]["cameras"]
-    devs = {d.get_info(rs.camera_info.serial_number): d for d in rs.context().query_devices()}
+    # Enumeration can fail transiently for a few seconds right after another
+    # process released the cameras (librealsense re-enumerates them); retry
+    # rather than crash without a verdict.
+    devs = {}
+    last_err = None
+    for attempt in range(6):
+        try:
+            devs = {d.get_info(rs.camera_info.serial_number): d for d in rs.context().query_devices()}
+            if len(devs) >= len(cams):
+                break
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+        time.sleep(1.0)
+    if last_err is not None and not devs:
+        print(f"could not enumerate RealSense devices after retries: {last_err}")
 
     print(f"Required by realsense_camera.py: color+depth {REQ_W}x{REQ_H} @{REQ_FPS}\n")
     print(f"{'role':14}{'serial':16}{'USB':6}{'color':>8}{'depth':>8}   verdict")
