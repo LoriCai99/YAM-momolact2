@@ -152,6 +152,11 @@ sg dialout -c "python experiments/launch_yaml_collect_data.py \
     --right_config_path=configs/yam_right.yaml"
 ```
 
+**Debug first, save nothing:** add `--dry_run` to the command above. Everything runs
+exactly as in a real session but episodes go to a temp directory that is deleted on
+exit, the real data directory is never touched or prompted about, and no
+post-collection pipeline runs. Use it after any hardware or code change.
+
 Hold the home pose at launch, same as teleop. Then, **with keyboard focus on the
 colour pad window** (not the terminal — this catches everyone out):
 

@@ -220,6 +220,12 @@ class Args:
     right_config_path: Optional[str] = None
     """Path to the right arm configuration YAML file (for bimanual operation)."""
 
+    dry_run: bool = False
+    """Debug run: everything runs exactly as in a real session (arms, leaders,
+    cameras, recorder), but episodes go to a throwaway temp directory that is
+    deleted on exit, nothing is prompted about the real output directory, and no
+    post-collection pipeline runs."""
+
     # use_save_interface: bool = False
     # """Enable saving data with keyboard interface."""
 
@@ -404,6 +410,18 @@ def main():
     left_cfg = OmegaConf.to_container(
         OmegaConf.load(args.left_config_path), resolve=True
     )
+    if args.dry_run:
+        import shutil
+        import tempfile
+
+        scratch = tempfile.mkdtemp(prefix="yam_dry_run_")
+        left_cfg["storage"]["base_dir"] = scratch
+        atexit.register(lambda: shutil.rmtree(scratch, ignore_errors=True))
+        print("=" * 72)
+        print(f"DRY RUN: episodes go to {scratch} and are DELETED on exit.")
+        print("         Real data dir is untouched; no post-collection pipeline.")
+        print("=" * 72)
+
     # Fail fast on cameras BEFORE touching the GELLO ports, prompting about the
     # output dir, or energizing anything.
     _preflight_cameras(left_cfg["sensors"]["cameras"])
@@ -594,7 +612,8 @@ def main():
         run_control_loop_prior(env, agent, left_cfg=left_cfg, data_saver=data_saver, kb_interface=kb_interface)
 
     cleanup()
-    run_post_collection_pipeline(left_cfg)
+    if not args.dry_run:
+        run_post_collection_pipeline(left_cfg)
     print("All tasks completed.")
 
 
