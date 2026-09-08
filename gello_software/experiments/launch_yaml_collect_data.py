@@ -430,6 +430,11 @@ def main():
 
     camera_cfg = left_cfg["sensors"]["cameras"]
     cameras = _open_cameras(camera_cfg)
+    # Register for cleanup NOW: if robot construction below raises (e.g. a motor
+    # not answering), the atexit handler must still stop the capture threads, or
+    # librealsense aborts/segfaults at interpreter exit.
+    global _cameras
+    _cameras = cameras
 
     # Create agent
     if bimanual:

@@ -9,10 +9,34 @@ from i2rt.robots.utils import GripperType
 class YAMRobot(Robot):
     """A class representing a simulated YAM robot."""
 
-    def __init__(self, channel="can0"):
+    def __init__(self, channel="can0", connect_attempts: int = 4, retry_delay_s: float = 1.0):
         from i2rt.robots.get_robot import get_yam_robot
 
-        self.robot = get_yam_robot(channel=channel, gripper_type=GripperType.LINEAR_4310)
+        # i2rt's power-on handshake gives each motor 5 x 10 ms to answer. On this rig
+        # one motor (can0 id 4) intermittently misses that window at launch -- while
+        # camera / Dynamixel threads contend for the GIL -- yet answers a ping a second
+        # later. Retry the whole construction a few times before giving up; a genuinely
+        # dead motor still fails, just a few seconds later and with a clearer message.
+        last_exc = None
+        for attempt in range(1, connect_attempts + 1):
+            try:
+                self.robot = get_yam_robot(channel=channel, gripper_type=GripperType.LINEAR_4310)
+                break
+            except (AssertionError, RuntimeError) as exc:
+                if "fail to communicate" not in str(exc):
+                    raise
+                last_exc = exc
+                print(f"[YAMRobot {channel}] attempt {attempt}/{connect_attempts}: {exc}")
+                if attempt < connect_attempts:
+                    import time
+
+                    time.sleep(retry_delay_s)
+        else:
+            raise RuntimeError(
+                f"YAMRobot({channel}): a motor did not answer the power-on handshake in "
+                f"{connect_attempts} attempts. Check that arm's power/E-stop, then reseat the CAN "
+                f"daisy-chain connector at the motor named above. Last error: {last_exc}"
+            ) from last_exc
 
         # YAM has 7 joints (6 arm joints + 1 gripper)
         self._joint_names = [
