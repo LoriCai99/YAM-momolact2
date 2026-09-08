@@ -92,25 +92,28 @@ decodes the first frame of every video (codec, pix_fmt, shape, dtype) and checks
 the state numerically (rot6d rows orthonormal, grippers in [0,1]). **Run it before
 handing data over.**
 
-## 3. Open questions for the flex-pi team
+## 3. Answers from the flex-pi team (2026-09-08) and what they imply
 
-1. **Camera FOV.** Measured at 640×360 on our rig vs their `camera_intrinsics.json`:
+| Question | Their answer | Implication for us |
+|---|---|---|
+| `cam_high` hardware | **Stereolabs ZED 2i** | Explains fx≈262: the ZED 2i has a ~110° HFOV. Our D435 is 69°. **This is the largest sensing gap** — the head view frames much less of the scene. Same format, different lens. |
+| wrist hardware | **ZED Mini** | fx≈366 ⇒ ~82° HFOV. Our D405s are ~89° — close. |
+| Depth source | (follows from the above) stereo-matched ZED depth | Ours is RealSense active-IR stereo. Both land in the same uint16-mm FFV1 streams, but ZED depth is dense and smoothed; RealSense has holes (`0`) on dark/shiny surfaces — see the `nonzero ~50 %` in our wrist frames. |
+| Gripper convention | **1 = open, 0 = closed** | **Matches ours** (i2rt command space, 1 = open). Pass-through is correct. |
+| `action26` vs 32-D | not yet answered | still ask for their builder/trainer config |
 
-   | camera | ours (fx) | flex-pi (fx) | HFOV ours / theirs |
-   |---|---|---|---|
-   | `cam_high` | **462** (D435) | **262** | 69° / ~101° |
-   | `cam_left_wrist` | 326 (D405) | 366 | 89° / 82° |
-   | `cam_right_wrist` | 326 (D405) | 367 | 89° / 82° |
+Measured at 640×360 on our rig vs their `camera_intrinsics.json`:
 
-   The wrists are close. The head camera is not: theirs sees a ~101° field, a D435
-   sees 69°. Same format, very different framing. Ask what camera/mode they used for
-   `cam_high` (a D455/D457 or a fisheye would fit 262); matching it is cheaper than
-   hoping finetuning absorbs it.
-2. **Gripper convention.** Ours is i2rt command space, 0..1, **1 = open**. Theirs
-   spans 0.04–0.996. Confirm 1 = open on their side.
-3. **`action26` in their builder name** (`flexpi-eef32-action26-openpi-aligned`)
-   while `action` is 32-D in the dataset — presumably the trainer slices. Ask for
-   the builder/trainer config rather than guessing.
+| camera | ours (fx) | flex-pi (fx) | HFOV ours / theirs |
+|---|---|---|---|
+| `cam_high` | 462 (D435) | 262 (ZED 2i) | 69° / ~101° |
+| `cam_left_wrist` | 326 (D405) | 366 (ZED Mini) | 89° / 82° |
+| `cam_right_wrist` | 326 (D405) | 367 (ZED Mini) | 89° / 82° |
+
+Options for the head camera, in order of fidelity: mount a ZED 2i (exact match);
+mount the D435 higher/further back so its 69° covers the same table area their 110°
+did (framing parity, not lens parity); or accept the gap and let finetuning absorb
+it. Decide this **before** the 100 episodes — it is baked into every frame.
 
 ## 4. Collection protocol (what the operator does)
 

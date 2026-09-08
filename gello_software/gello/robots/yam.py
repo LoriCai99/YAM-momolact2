@@ -9,14 +9,27 @@ from i2rt.robots.utils import GripperType
 class YAMRobot(Robot):
     """A class representing a simulated YAM robot."""
 
-    def __init__(self, channel="can0", connect_attempts: int = 4, retry_delay_s: float = 1.0):
+    # i2rt's power-on handshake waits max_retry x 10 ms for each motor's reply
+    # (default 5 = 50 ms). That is enough in a quiet process but not once the
+    # launcher's camera capture threads and Dynamixel readers are contending for
+    # the GIL: reproduced deterministically on this rig -- 50 ms fails on motor 4
+    # or 5, 500 ms succeeds every time. Widen it before constructing the chain.
+    HANDSHAKE_RETRIES = 50
+
+    @staticmethod
+    def _widen_handshake_window(max_retry: int) -> None:
+        import i2rt.motor_drivers.can_interface as ci
+
+        f = ci.CanInterface._send_message_get_response
+        if f.__defaults__ and f.__defaults__[0] != max_retry:
+            f.__defaults__ = (max_retry,) + tuple(f.__defaults__[1:])
+
+    def __init__(self, channel="can0", connect_attempts: int = 3, retry_delay_s: float = 1.0):
         from i2rt.robots.get_robot import get_yam_robot
 
-        # i2rt's power-on handshake gives each motor 5 x 10 ms to answer. On this rig
-        # one motor (can0 id 4) intermittently misses that window at launch -- while
-        # camera / Dynamixel threads contend for the GIL -- yet answers a ping a second
-        # later. Retry the whole construction a few times before giving up; a genuinely
-        # dead motor still fails, just a few seconds later and with a clearer message.
+        self._widen_handshake_window(self.HANDSHAKE_RETRIES)
+        # Belt and braces: a genuinely dead motor still fails, just with a clearer
+        # message that names what to check physically.
         last_exc = None
         for attempt in range(1, connect_attempts + 1):
             try:
