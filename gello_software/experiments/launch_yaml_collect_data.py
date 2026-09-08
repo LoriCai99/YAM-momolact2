@@ -19,7 +19,14 @@ from gello.utils.launch_utils import instantiate_from_dict, move_to_start_positi
 from gello.dynamixel.driver import DynamixelDriver
 import numpy as np
 
-from gello.cameras.realsense_camera import RealSenseCamera, get_device_ids
+from gello.cameras.realsense_camera import (
+    STREAM_FPS,
+    STREAM_HEIGHT,
+    STREAM_WIDTH,
+    RealSenseCamera,
+    check_stream_support,
+    get_device_ids,
+)
 from gello.data_utils.data_saver import DataSaver
 from gello.data_utils.keyboard_interface import KBReset
 from gello.utils.control_utils import run_control_loop_prior
@@ -53,6 +60,45 @@ def _call_cleanup_methods(resource, resource_name: str, methods: list[str]) -> N
             except Exception as e:
                 print(f"Error calling {resource_name}.{method_name}(): {e}")
             return
+
+
+CAMERA_ROLES = ["left_camera", "front_camera", "right_camera"]
+
+
+def _preflight_cameras(camera_cfg: dict) -> None:
+    """Exit with a clear table if any configured camera cannot serve the required streams.
+
+    Runs BEFORE the output-directory prompt and the GELLO ports are opened. A camera
+    on a USB 2 link enumerates fine but cannot serve colour 640x360, and
+    pipeline.start() would later die with the opaque "Couldn't resolve requests".
+    """
+    roles = CAMERA_ROLES
+    report = {r: check_stream_support(camera_cfg[r]["device_id"]) for r in roles}
+    bad = {r: v for r, v in report.items() if not v["ok"]}
+    print(f"Camera pre-flight (need colour+depth {STREAM_WIDTH}x{STREAM_HEIGHT}@{STREAM_FPS}):")
+    for r in roles:
+        v = report[r]
+        print(f"  {r:13} {camera_cfg[r]['device_id']}  USB {v['usb'] or '--':4}  {'OK' if v['ok'] else 'FAIL: ' + v['reason']}")
+    if bad:
+        print("\nRefusing to start: the camera(s) above cannot deliver the required streams.")
+        print("This is a USB-link / hardware condition, not a config error. Diagnose with:")
+        print("    python scripts/check_cameras.py")
+        sys.exit(2)
+
+
+def _open_cameras(camera_cfg: dict) -> dict:
+    """Open all cameras; if one fails, close the ones already streaming so
+    librealsense does not abort at interpreter exit."""
+    roles = CAMERA_ROLES
+    opened: dict = {}
+    try:
+        for r in roles:
+            opened[r] = RealSenseCamera(camera_cfg[r]["device_id"])
+    except Exception as exc:
+        for name, cam in opened.items():
+            _close_realsense_camera(cam, name)
+        raise RuntimeError(f"failed to open {r} ({camera_cfg[r]['device_id']}): {exc}") from exc
+    return opened
 
 
 def _close_realsense_camera(camera, camera_name: str) -> None:
@@ -355,6 +401,9 @@ def main():
     left_cfg = OmegaConf.to_container(
         OmegaConf.load(args.left_config_path), resolve=True
     )
+    # Fail fast on cameras BEFORE touching the GELLO ports, prompting about the
+    # output dir, or energizing anything.
+    _preflight_cameras(left_cfg["sensors"]["cameras"])
     left_cfg = update_offsets(left_cfg)
     if bimanual:
         right_cfg = OmegaConf.to_container(
@@ -380,11 +429,7 @@ def main():
     kb_interface = KBReset()
 
     camera_cfg = left_cfg["sensors"]["cameras"]
-    cameras = {
-        "left_camera": RealSenseCamera(camera_cfg["left_camera"]["device_id"]),
-        "front_camera": RealSenseCamera(camera_cfg["front_camera"]["device_id"]),
-        "right_camera": RealSenseCamera(camera_cfg["right_camera"]["device_id"]),
-    }
+    cameras = _open_cameras(camera_cfg)
 
     # Create agent
     if bimanual:

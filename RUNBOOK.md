@@ -247,7 +247,7 @@ consumes. `lerobot.auto_convert` stays false.
 | `online motors: []` on both buses | CAN interfaces went DOWN after a USB re-enumeration | `sudo bash i2rt/scripts/reset_all_can.sh`. Confirm with `cansend can1 001#11` → `Network is down` |
 | `cansend` → `No buffer space available` | No node is ACKing: arms genuinely unpowered or unplugged. TX queue wedges | Power the arms, then reset CAN to clear the wedge |
 | **Teleop hangs, no output** | `driver.py:509` spins on `while self._joint_angles is None` with no timeout. A non-responding servo only prints `Failed to set torque mode…` then blocks forever | `scripts/ping_gello.py`. Silence at every baudrate ⇒ the Dynamixel **power rail** is off (USB enumeration proves nothing — the U2D2 is bus-powered) |
-| `RuntimeError: Couldn't resolve requests` | D435 on USB 2.1 lacks color 640×360 | §2① — USB 3 cable |
+| Collection prints `Camera pre-flight … FAIL: USB 2.1 link` and exits (code 2) | That camera cannot serve colour+depth 640×360@30 on a USB 2 link — a D435 at USB 2.1 does not offer the mode at all | §2① — get it onto USB 3 (or use any other D4xx). Not a config error; nothing was opened or energized |
 | `Device or resource busy` on a camera | Something else holds it | `ps aux \| grep camera_server`; `sudo fuser -v /dev/video*` |
 | A D405 vanishes from USB | ASMedia controller `05:00.0` dropping devices | `echo 1 \| sudo tee /sys/bus/pci/devices/0000:05:00.0/remove && echo 1 \| sudo tee /sys/bus/pci/rescan` |
 | Permission denied on `/dev/ttyUSB*` | `dialout` not active in this shell | `sg dialout -c "..."`, or log out and back in |

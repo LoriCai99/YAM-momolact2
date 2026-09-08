@@ -10,6 +10,51 @@ from gello.cameras.camera import CameraDriver
 
 logger = logging.getLogger(__name__)
 
+# The one stream configuration every camera must deliver (flex-pi trains on 640x360 @30).
+STREAM_WIDTH, STREAM_HEIGHT, STREAM_FPS = 640, 360, 30
+
+
+def check_stream_support(serial: str, width: int = STREAM_WIDTH, height: int = STREAM_HEIGHT,
+                         fps: int = STREAM_FPS) -> dict:
+    """Can this device deliver colour bgr8 + depth z16 at (width, height, fps)?
+
+    Returns {"present", "usb", "color", "depth", "ok", "reason"}. Cheap (no streaming),
+    so call it before constructing RealSenseCamera: a device on a USB 2 link
+    enumerates normally but omits several modes -- a D435 at USB 2.1 has no colour
+    640x360 at all -- and ``pipeline.start`` then fails with the opaque
+    "Couldn't resolve requests".
+    """
+    import pyrealsense2 as rs
+
+    out = {"present": False, "usb": None, "color": False, "depth": False, "ok": False, "reason": "not connected"}
+    for dev in rs.context().query_devices():
+        if dev.get_info(rs.camera_info.serial_number) != serial:
+            continue
+        out["present"] = True
+        out["usb"] = dev.get_info(rs.camera_info.usb_type_descriptor)
+        for sensor in dev.query_sensors():
+            for prof in sensor.get_stream_profiles():
+                try:
+                    v = prof.as_video_stream_profile()
+                except Exception:
+                    continue
+                if (v.width(), v.height(), prof.fps()) != (width, height, fps):
+                    continue
+                if prof.stream_type() == rs.stream.color and prof.format() == rs.format.bgr8:
+                    out["color"] = True
+                if prof.stream_type() == rs.stream.depth and prof.format() == rs.format.z16:
+                    out["depth"] = True
+        out["ok"] = out["color"] and out["depth"]
+        if out["ok"]:
+            out["reason"] = "ok"
+        elif str(out["usb"]).startswith("2"):
+            out["reason"] = (f"USB {out['usb']} link: this mode is not offered at USB 2. "
+                             f"Needs a USB 3 link (cable/port/camera).")
+        else:
+            out["reason"] = f"mode {width}x{height}@{fps} unsupported (colour={out['color']}, depth={out['depth']})"
+        break
+    return out
+
 
 def get_device_ids() -> List[str]:
     import pyrealsense2 as rs
@@ -116,8 +161,8 @@ class RealSenseCamera(CameraDriver):
             if self._device_id is not None:
                 self._config.enable_device(self._device_id)
 
-            self._config.enable_stream(rs.stream.depth, 640, 360, rs.format.z16, 30)
-            self._config.enable_stream(rs.stream.color, 640, 360, rs.format.bgr8, 30)
+            self._config.enable_stream(rs.stream.depth, STREAM_WIDTH, STREAM_HEIGHT, rs.format.z16, STREAM_FPS)
+            self._config.enable_stream(rs.stream.color, STREAM_WIDTH, STREAM_HEIGHT, rs.format.bgr8, STREAM_FPS)
 
             profile = self._pipeline.start(self._config)
             self._cache_stream_meta(profile)
