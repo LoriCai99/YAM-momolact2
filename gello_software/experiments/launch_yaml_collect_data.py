@@ -1,4 +1,5 @@
 import atexit
+import os
 from math import inf
 from multiprocessing import Process
 import signal
@@ -598,4 +599,19 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException as exc:  # noqa: BLE001 -- includes KeyboardInterrupt
+        # The in-process ZMQ hardware server runs on a NON-daemon thread, so an
+        # unhandled exception in main() would print its traceback and then hang
+        # forever (Python joins non-daemon threads before atexit handlers run):
+        # arms energized, cameras and GELLO ports held, colour pad grey. Clean up
+        # explicitly and hard-exit instead.
+        import traceback
+
+        if not isinstance(exc, KeyboardInterrupt):
+            traceback.print_exc()
+        try:
+            cleanup()
+        finally:
+            os._exit(0 if isinstance(exc, KeyboardInterrupt) else 1)
