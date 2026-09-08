@@ -1,5 +1,5 @@
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
 
@@ -46,8 +46,19 @@ class RobotEnv:
         control_rate_hz: float = 100.0,
         camera_dict: Optional[Dict[str, CameraDriver]] = None,
         camera_client: Optional[Any] = None,
+        gripper_indices: Optional[Sequence[int]] = None,
     ) -> None:
         self._robot = robot
+        # Joint indices that are grippers. The start/dynamic offsets below exist so
+        # the ARM does not jump when the leader is not exactly at the follower's
+        # pose at 's'; a gripper must map ABSOLUTELY from its calibrated trigger.
+        # Offsetting it turned "trigger parked at 0.73 when s was pressed" into
+        # "every command shifted by +0.27 -> gripper never fully closes" (2026-09-08).
+        # Default: YAM layout (6 arm joints + gripper per arm).
+        if gripper_indices is None:
+            n = robot.num_dofs()
+            gripper_indices = tuple(range(6, n, 7)) if n % 7 == 0 else ()
+        self._gripper_indices = tuple(int(i) for i in gripper_indices)
         self._rate = Rate(control_rate_hz)
         self._camera_dict = {} if camera_dict is None else camera_dict
         # When set, get_obs() pulls images from the camera server over ZMQ
@@ -60,11 +71,19 @@ class RobotEnv:
         self._dynamic_offset = np.zeros(self._robot.num_dofs())
         self._original_offset = np.zeros(self._robot.num_dofs())
 
+    def _zero_grippers(self, offset: np.ndarray) -> np.ndarray:
+        for i in self._gripper_indices:
+            if i < len(offset):
+                offset[i] = 0.0
+        return offset
+
     def set_original_offset(self, gello_joints: np.ndarray) -> None:
-        self._original_offset = gello_joints - self._robot.get_joint_state()
+        self._original_offset = self._zero_grippers(gello_joints - self._robot.get_joint_state())
 
     def set_dynamic_offset(self, gello_joints: np.ndarray) -> None:
-        self._dynamic_offset = gello_joints - self._robot.get_joint_state() - self._original_offset
+        self._dynamic_offset = self._zero_grippers(
+            gello_joints - self._robot.get_joint_state() - self._original_offset
+        )
 
     def robot(self) -> Robot:
         """Get the robot object.

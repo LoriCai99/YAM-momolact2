@@ -18,7 +18,8 @@ agent:
     # squeezed -> 0 (i2rt closed), released -> 1 (i2rt open). The trigger rests
     # at ~113.5 deg, just past the released bound, so hands-off = fully open.
     gripper_config: [14, 57.5288, 112.1880]
-  start_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  # Gripper 1.0 = OPEN at home, same as the left arm (a released trigger is open).
+  start_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 hz: 30
 max_steps: 1000
 
