@@ -21,6 +21,17 @@ import sys
 import cv2
 import numpy as np
 
+
+def _cfg_path(rel: str) -> str:
+    """Resolve a configs/… path from the script's own location, so these tools work
+    from any cwd (they used to die with FileNotFoundError when run from the repo root)."""
+    import os
+
+    if os.path.exists(rel):
+        return rel
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # gello_software/
+    return os.path.join(here, rel)
+
 CAMS = ("front", "left", "right")
 
 
@@ -88,7 +99,7 @@ def main() -> None:
     d = a.data_dir
     if d is None:
         from omegaconf import OmegaConf
-        cfg = OmegaConf.to_container(OmegaConf.load("configs/yam_left.yaml"), resolve=True)["storage"]
+        cfg = OmegaConf.to_container(OmegaConf.load(_cfg_path("configs/yam_left.yaml")), resolve=True)["storage"]
         d = os.path.join(cfg["base_dir"], cfg["task_directory"])
     eps = sorted(p for p in glob.glob(os.path.join(d, "[0-9]*")) if os.path.isdir(p))
     if a.episodes:

@@ -18,6 +18,17 @@ from omegaconf import OmegaConf
 
 from gello.dynamixel.driver import DynamixelDriver
 
+
+def _cfg_path(rel: str) -> str:
+    """Resolve a configs/… path from the script's own location, so these tools work
+    from any cwd (they used to die with FileNotFoundError when run from the repo root)."""
+    import os
+
+    if os.path.exists(rel):
+        return rel
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # gello_software/
+    return os.path.join(here, rel)
+
 LEADERS = {"FTAO9WCV": [8, 9, 10, 11, 12, 13, 14], "FTAO9WPU": [1, 2, 3, 4, 5, 6, 7]}
 PORT = "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_{}-if00-port0"
 THRESH = 0.15  # rad; noise floor is ~0.001
@@ -74,8 +85,8 @@ def main():
     left_leader = next(k for k in LEADERS if k != right_leader)
     left_bus = "can0" if right_bus == "can1" else "can1"
 
-    L = OmegaConf.to_container(OmegaConf.load("configs/yam_left.yaml"), resolve=True)
-    R = OmegaConf.to_container(OmegaConf.load("configs/yam_right.yaml"), resolve=True)
+    L = OmegaConf.to_container(OmegaConf.load(_cfg_path("configs/yam_left.yaml")), resolve=True)
+    R = OmegaConf.to_container(OmegaConf.load(_cfg_path("configs/yam_right.yaml")), resolve=True)
     cfg = {"left": (L["agent"]["port"].split("Converter_")[-1][:8], L["robot"]["channel"]),
            "right": (R["agent"]["port"].split("Converter_")[-1][:8], R["robot"]["channel"])}
     print(f"\nPhysical:  LEFT = leader {left_leader} + arm {left_bus}   |   RIGHT = leader {right_leader} + arm {right_bus}")

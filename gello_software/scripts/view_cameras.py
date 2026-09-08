@@ -23,6 +23,17 @@ import numpy as np
 import pyrealsense2 as rs
 from omegaconf import OmegaConf
 
+
+def _cfg_path(rel: str) -> str:
+    """Resolve a configs/… path from the script's own location, so these tools work
+    from any cwd (they used to die with FileNotFoundError when run from the repo root)."""
+    import os
+
+    if os.path.exists(rel):
+        return rel
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # gello_software/
+    return os.path.join(here, rel)
+
 # Order the policy expects: front/top first, then left, then right.
 ROLE_ORDER = ["front_camera", "left_camera", "right_camera"]
 
@@ -35,7 +46,7 @@ def main() -> None:
     ap.add_argument("--fps", type=int, default=30)
     args = ap.parse_args()
 
-    cam_cfg = OmegaConf.to_container(OmegaConf.load(args.config), resolve=True)
+    cam_cfg = OmegaConf.to_container(OmegaConf.load(_cfg_path(args.config)), resolve=True)
     cam_cfg = cam_cfg["sensors"]["cameras"]
     present = {d.get_info(rs.camera_info.serial_number) for d in rs.context().query_devices()}
 

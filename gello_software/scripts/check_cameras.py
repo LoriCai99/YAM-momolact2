@@ -20,15 +20,25 @@ import time
 import pyrealsense2 as rs
 from omegaconf import OmegaConf
 
+
+def _cfg_path(rel: str) -> str:
+    """Resolve a configs/… path from the script's own location, so these tools work
+    from any cwd (they used to die with FileNotFoundError when run from the repo root)."""
+    import os
+
+    if os.path.exists(rel):
+        return rel
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # gello_software/
+    return os.path.join(here, rel)
+
 REQ_W, REQ_H, REQ_FPS = 640, 360, 30
 
 
 def main() -> None:
-    cfg = OmegaConf.to_container(OmegaConf.load("configs/yam_left.yaml"), resolve=True)
+    cfg = OmegaConf.to_container(OmegaConf.load(_cfg_path("configs/yam_left.yaml")), resolve=True)
     cams = cfg["sensors"]["cameras"]
-    # Enumeration can fail transiently for a few seconds right after another
-    # process released the cameras (librealsense re-enumerates them); retry
-    # rather than crash without a verdict.
+    # Retry enumeration briefly in case cameras are still re-enumerating after
+    # another process released them.
     devs = {}
     last_err = None
     for attempt in range(6):

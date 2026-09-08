@@ -27,6 +27,17 @@ from omegaconf import OmegaConf
 from gello.dynamixel.driver import DynamixelDriver
 
 
+def _cfg_path(rel: str) -> str:
+    """Resolve a configs/… path from the script's own location, so these tools work
+    from any cwd (they used to die with FileNotFoundError when run from the repo root)."""
+    import os
+
+    if os.path.exists(rel):
+        return rel
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # gello_software/
+    return os.path.join(here, rel)
+
+
 def read_follower(mci, ids, motor_type):
     q = []
     for mid in ids:
@@ -41,7 +52,7 @@ def main() -> None:
     ap.add_argument("--side", choices=["left", "right"], required=True)
     ap.add_argument("--config")
     args = ap.parse_args()
-    cfg_path = args.config or f"configs/yam_{args.side}.yaml"
+    cfg_path = args.config or _cfg_path(f"configs/yam_{args.side}.yaml")
     cfg = OmegaConf.to_container(OmegaConf.load(cfg_path), resolve=True)
     agent, dxl = cfg["agent"], cfg["agent"]["dynamixel_config"]
     ids, signs = list(dxl["joint_ids"]), np.array(dxl["joint_signs"], dtype=float)
