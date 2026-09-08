@@ -27,7 +27,7 @@ PORT_FMT = "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_{}-if00-port0"
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--side", choices=["left", "right"], required=True)
-    ap.add_argument("--seconds", type=float, default=20.0)
+    ap.add_argument("--seconds", type=float, default=30.0)
     args = ap.parse_args()
 
     serial, ids = SIDES[args.side]
@@ -40,17 +40,28 @@ def main() -> None:
     for _ in range(10):
         d.get_joints()
 
-    print(f"\n>>> Work the trigger through its FULL range for {args.seconds:.0f}s:")
-    print(">>> squeeze all the way closed, release all the way open, repeat.\n")
+    rest = d.get_joints()[-1] * 180.0 / np.pi
+    print(f"\nTrigger at rest reads {rest:.2f} deg.")
+    input(f">>> Get hold of the {args.side.upper()} trigger, then press Enter to start the {args.seconds:.0f}s window: ")
+    print(">>> Squeeze ALL the way closed, release ALL the way open, repeat until the countdown ends.\n")
 
     lo, hi = float("inf"), float("-inf")
     t0 = time.time()
-    while time.time() - t0 < args.seconds:
+    last_change = t0
+    while True:
+        elapsed = time.time() - t0
+        if elapsed >= args.seconds:
+            break
         deg = d.get_joints()[-1] * 180.0 / np.pi
+        if deg < lo - 0.05 or deg > hi + 0.05:
+            last_change = time.time()
         lo, hi = min(lo, deg), max(hi, deg)
         bar = int(np.clip((deg - lo) / max(hi - lo, 1e-6), 0, 1) * 40)
-        print(f"\r  now {deg:7.2f} deg   min {lo:7.2f}   max {hi:7.2f}   "
+        print(f"\r  {args.seconds - elapsed:4.0f}s left   now {deg:7.2f} deg   min {lo:7.2f}   max {hi:7.2f}   "
               f"[{'#' * bar}{'.' * (40 - bar)}]", end="", flush=True)
+        # stop early once a real range has been found and nothing new for 4 s
+        if hi - lo > 10 and time.time() - last_change > 4.0 and elapsed > 6.0:
+            break
         time.sleep(0.02)
     d.close()
 
