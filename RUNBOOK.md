@@ -35,7 +35,7 @@ this repo's `i2rt/` subdirectory. `import i2rt` never reads the in-repo tree.
 
 ## 2. Known blockers — read before you start
 
-**① The D435 is on USB 2.1, which breaks data collection.**
+**① The front D435 must link at USB 3 — check before every session.**
 At USB 2.1 the D435 does not offer **color 640×360**, which is exactly what
 `gello/cameras/realsense_camera.py` requests. Collection dies with:
 
@@ -43,9 +43,11 @@ At USB 2.1 the D435 does not offer **color 640×360**, which is exactly what
 RuntimeError: Couldn't resolve requests
 ```
 
-*Fix:* a genuine **USB 3 cable into a USB 3 port**. Many cables that fit are USB 2
-only. Avoid the ASMedia controller at `05:00.0` — it dropped both D405s
-mid-session once. Confirm it reports `3.2`:
+Resolved 2026-09-08: after a week of diagnosis it was the **USB-C cable** (no
+SuperSpeed wires — it fits and powers the camera, and looks identical to a USB 3
+lead). Not the port, not the camera. If it recurs, swap the cable first. Avoid the
+ASMedia controller at `05:00.0` — it dropped both D405s mid-session once. Confirm
+every camera reports `3.2`:
 
 ```bash
 python -c "

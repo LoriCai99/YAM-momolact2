@@ -94,11 +94,18 @@ handing data over.**
 
 ## 3. Open questions for the flex-pi team
 
-1. **Camera FOV.** Our D405 wrist cams report fx≈326 at 640×360; theirs are fx≈366
-   (~12 % narrower). Their `cam_high` fx≈262 implies ~101° HFOV — wider than a
-   D435's 69° colour FOV, so it may be a different camera or stream mode. Ask
-   what hardware/modes they used; matching it is cheaper than fighting it in
-   training.
+1. **Camera FOV.** Measured at 640×360 on our rig vs their `camera_intrinsics.json`:
+
+   | camera | ours (fx) | flex-pi (fx) | HFOV ours / theirs |
+   |---|---|---|---|
+   | `cam_high` | **462** (D435) | **262** | 69° / ~101° |
+   | `cam_left_wrist` | 326 (D405) | 366 | 89° / 82° |
+   | `cam_right_wrist` | 326 (D405) | 367 | 89° / 82° |
+
+   The wrists are close. The head camera is not: theirs sees a ~101° field, a D435
+   sees 69°. Same format, very different framing. Ask what camera/mode they used for
+   `cam_high` (a D455/D457 or a fisheye would fit 262); matching it is cheaper than
+   hoping finetuning absorbs it.
 2. **Gripper convention.** Ours is i2rt command space, 0..1, **1 = open**. Theirs
    spans 0.04–0.996. Confirm 1 = open on their side.
 3. **`action26` in their builder name** (`flexpi-eef32-action26-openpi-aligned`)
@@ -117,7 +124,8 @@ handing data over.**
 
 ## 5. Hard prerequisites on this rig
 
-* The **D435 must link at USB 3** — at USB 2.1 it offers no colour 640×360 and
-  sustains only ~27 fps. `python gello_software/scripts/check_cameras.py` must say READY.
+* All three cameras **must link at USB 3** — at USB 2.1 a D435 offers no colour
+  640×360 and sustains only ~27 fps. `python gello_software/scripts/check_cameras.py`
+  must say READY. (The 2026-09-08 outage was a USB-C cable without SuperSpeed wires.)
 * Both grippers calibrated (`scripts/calibrate_gripper.py`) — a trigger past its
   configured closed bound records a constant gripper channel.

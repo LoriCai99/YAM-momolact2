@@ -9,16 +9,12 @@ sensors:
       device_id: "335122270697"    # D405 (short range), left
     front_camera:
       device_id: "922612071156"    # D435 (wide FOV), front/top role.
-                                   # !! BLOCKER while on USB 2.1 !! This camera
-                                   # currently negotiates USB 2.1, and at 2.1 the
-                                   # D435 does NOT offer color 640x360 -- which is
-                                   # exactly what realsense_camera.py requests, so
-                                   # data collection dies with
-                                   #   RuntimeError: Couldn't resolve requests
-                                   # FIX: use a real USB 3 cable into a USB 3 port
-                                   # (avoid the ASMedia card at 05:00.0). Verify it
-                                   # reports 3.2, not 2.1, via view_cameras.py or
-                                   # the snippet in RUNBOOK.md.
+                                   # Must link at USB 3: at USB 2.1 a D435 offers no
+                                   # colour 640x360 and collection cannot start (the
+                                   # launcher's pre-flight says so). On 2026-09-08 this
+                                   # camera sat at USB 2.1 for a week -- it was the
+                                   # CABLE (a USB-C lead without SuperSpeed wires), not
+                                   # the camera. Check: python scripts/check_cameras.py
     right_camera:
       device_id: "218622275075"    # D405 (short range), right
 
