@@ -496,9 +496,6 @@ def main():
         OmegaConf.load(args.left_config_path), resolve=True
     )
     if args.dry_run:
-        import shutil
-        import tempfile
-
         scratch = tempfile.mkdtemp(prefix="yam_dry_run_")
         left_cfg["storage"]["base_dir"] = scratch
         atexit.register(lambda: shutil.rmtree(scratch, ignore_errors=True))
