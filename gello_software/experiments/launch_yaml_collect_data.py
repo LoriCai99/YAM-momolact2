@@ -250,6 +250,7 @@ def cleanup():
     _call_cleanup_methods(_robot, "robot", ["close", "stop", "shutdown"])
     _call_cleanup_methods(_agent, "agent", ["close", "stop", "shutdown"])
     _call_cleanup_methods(_env, "env", ["close", "stop", "shutdown"])
+    _call_cleanup_methods(_data_saver, "data_saver", ["finalize_on_exit"])
     _call_cleanup_methods(_data_saver, "data_saver", ["close", "stop", "shutdown"])
 
     if isinstance(_cameras, dict):

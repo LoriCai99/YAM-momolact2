@@ -187,7 +187,7 @@ def _parse_multipart(parts) -> Optional[Dict[str, Any]]:
             buf = parts[i].buffer if hasattr(parts[i], "buffer") else parts[i]
             depth[cam["name"]] = np.frombuffer(buf, dtype=d["dtype"]).reshape(d["shape"])
             i += 1
-    return {"frames": frames, "depth": depth, "timestamps": header.get("timestamps") or {}}
+    return {"frames": frames, "depth": depth, "timestamps": header.get("timestamps") or {}, "stale": list(header.get("stale") or [])}
 
 
 class CameraStreamClient:
@@ -203,9 +203,11 @@ class CameraStreamClient:
     """
 
     def __init__(self, rep_endpoint: str, pub_endpoint: str, request_timeout_ms: int = 500,
-                 max_frame_age_sec: Optional[float] = 0.5, recv_timeout_ms: int = 200) -> None:
-        self.req = CameraClient(rep_endpoint, request_timeout_ms=request_timeout_ms, max_frame_age_sec=max_frame_age_sec)
-        self.max_frame_age_sec = max_frame_age_sec
+                 max_frame_age_sec: Optional[float] = 0.5, recv_timeout_ms: int = 200,
+                 stream_timeout_sec: float = 3.0) -> None:
+        self.req = CameraClient(rep_endpoint, request_timeout_ms=request_timeout_ms, max_frame_age_sec=None)
+        self.max_frame_age_sec = max_frame_age_sec   # informational: per-camera staleness threshold
+        self.stream_timeout_sec = float(stream_timeout_sec)
         self.pub_endpoint = pub_endpoint
         self._ctx = zmq.Context.instance()
         self._sub = self._ctx.socket(zmq.SUB)
@@ -265,10 +267,15 @@ class CameraStreamClient:
             if time.time() > deadline:
                 raise CameraClientError(f"no frames received on {self.pub_endpoint} within {first_timeout_sec:.0f}s")
             time.sleep(0.005)
-        if self.max_frame_age_sec is not None:
-            age = time.time() - rx
-            if age > self.max_frame_age_sec:
-                raise CameraClientError(f"camera stream stale: last frame set received {age:.3f}s ago (>{self.max_frame_age_sec}s)")
+        # Per-camera staleness is reported in obs["stale"] / obs["timestamps"] and
+        # handled by the caller (RobotEnv marks it, the loop shows it, the recorder
+        # logs it). Only a SILENT SERVER -- no frame sets at all for a while -- is
+        # fatal here: that means the camera server died or the link is gone.
+        age = time.time() - rx
+        if age > self.stream_timeout_sec:
+            raise CameraClientError(
+                f"camera server stopped publishing: no frame set for {age:.1f}s (>{self.stream_timeout_sec}s)"
+            )
         return obs
 
     def close(self) -> None:

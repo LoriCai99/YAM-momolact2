@@ -291,6 +291,7 @@ class DataSaver:
             "joint": _to_list(obs["joint_positions"]),
             "next_joint": _to_list(obs["next_joint"]),
             "camera_timestamps": {},
+            "camera_stale": list(obs.get("camera_stale") or []),
             "images": {},
         }
 
@@ -366,6 +367,8 @@ class DataSaver:
         if ep is None:
             logger.error("save_episode_json: no episode matches the buffer; nothing written")
             return
+        if ep.saved:
+            return
         ep.save_pending = True
         logger.info(f"Saving episode {ep.index} to {ep.dir} with {len(ep.records)} observations.")
         ep.wait_writes()
@@ -387,6 +390,7 @@ class DataSaver:
                 "next_left_joint": str(nj[:7]),
                 "next_right_joint": str(nj[7:]),
                 "camera_timestamps": r["camera_timestamps"],
+                "camera_stale": r.get("camera_stale", []),
             }
             for key, path in r["images"].items():
                 row[f"image_{key}"] = path
@@ -438,7 +442,34 @@ class DataSaver:
             "joint_units": "rad (arm joints), gripper in i2rt command space [0, 1], 1 = open",
             "action_semantics": "next_joint = follower joint positions after applying the leader command at this step",
             "image_write_errors": ep.write_errors,
+            "frames_with_stale_camera": sum(1 for r in records if r.get("camera_stale")),
         }
+
+    def finalize_on_exit(self) -> None:
+        """Called from the launcher's cleanup on crash / Ctrl-C.
+
+        - An episode the operator already pressed SAVE on but the background saver
+          has not finalised yet is written now (synchronously), so it is not lost.
+        - The in-progress episode (recording, never saved) is discarded: its frames
+          are removed rather than left as an incomplete directory.
+        """
+        for ep in list(self._episodes.values()):
+            if ep.save_pending and not ep.saved and not ep.discarded and ep.records:
+                try:
+                    logger.warning(f"Exit with episode {ep.index} still queued for saving; finalising it now.")
+                    self.save_episode_json(ep.records)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(f"could not finalise episode {ep.index}: {exc}")
+        with self._lock:
+            ep = self._current
+            self._current = None
+            self.buffer = []
+        if ep is not None and not ep.save_pending and not ep.saved and not ep.discarded:
+            logger.warning(f"Exit with episode {ep.index} in progress ({len(ep.records)} frames, never saved); discarding it.")
+            ep.discarded = True
+            ep.wait_writes(timeout=10.0)
+            shutil.rmtree(ep.dir, ignore_errors=True)
+            self._episodes.pop(ep.index, None)
 
     def close(self) -> None:
         self._pool.shutdown(wait=True)

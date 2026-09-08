@@ -110,3 +110,30 @@ def test_discard_then_resave_does_not_delete_the_saved_episode(tmp_path):
     assert (tmp_path / "raw" / f"{idx_b:06d}" / "meta.json").exists(), "saved episode was deleted by stale cleanup"
     s._pool.submit = real
     s.close()
+
+
+def test_finalize_on_exit_flushes_pending_save_and_discards_in_progress(tmp_path):
+    """Ctrl-C / crash: a take already sent to save is finalised; the take in progress is removed."""
+    import numpy as np
+
+    from gello.data_utils.data_saver import DataSaver
+
+    def obs(t):
+        o = {"joint_positions": np.zeros(14), "next_joint": np.zeros(14)}
+        for c in ("left", "front", "right"):
+            o[f"{c}_camera_rgb"] = np.zeros((8, 8, 3), np.uint8)
+            o[f"{c}_camera_depth"] = np.zeros((8, 8, 1), np.uint16)
+        return o
+
+    s = DataSaver(save_dir=str(tmp_path), task_directory="raw", language_instruction="x", fps=30, saver_max_workers=2)
+    s.reset_buffer()
+    for t in range(3):
+        s.add_observation(obs(t))
+    s.mark_pending_save(s.buffer)   # operator pressed save; background saver has NOT run yet
+    s.reset_buffer()                # loop moved on
+    for t in range(2):
+        s.add_observation(obs(t))   # new take in progress, never saved
+    s.finalize_on_exit()            # what cleanup() calls on crash / Ctrl-C
+    s.close()
+    assert (tmp_path / "raw" / "000001" / "meta.json").exists(), "pending save was not finalised"
+    assert not (tmp_path / "raw" / "000002").exists(), "in-progress take was not discarded"

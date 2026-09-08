@@ -207,3 +207,21 @@ def test_gripper_channels_are_clipped_to_unit_interval():
     st = fc.joints14_to_state32(q, fk)
     assert st[18] == 0.0 and st[19] == 1.0
     assert st[20:26].tolist() == [0.0] * 6  # joints untouched
+
+
+def test_recorder_logs_stale_cameras_per_frame(tmp_path):
+    rng = np.random.default_rng(3)
+    saver = DataSaver(save_dir=str(tmp_path), task_directory="raw", language_instruction="x", fps=30,
+                      camera_meta=_camera_meta(), saver_max_workers=2)
+    saver.reset_buffer()
+    for t in range(4):
+        o = _fake_obs(t, rng)
+        if t >= 2:
+            o["camera_stale"] = ["left"]
+        saver.add_observation(o)
+    saver.mark_pending_save(saver.buffer)
+    saver.save_episode_json(saver.buffer)
+    saver.close()
+    rows = json.load(open(tmp_path / "raw" / "000001" / "000001.json"))
+    assert rows[0]["camera_stale"] == [] and rows[3]["camera_stale"] == ["left"]
+    assert json.load(open(tmp_path / "raw" / "000001" / "meta.json"))["frames_with_stale_camera"] == 2

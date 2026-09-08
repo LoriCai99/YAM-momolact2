@@ -160,7 +160,16 @@ class RealSenseCamera(CameraDriver):
                 if consecutive_failures >= self._max_read_attempts:
                     self._frame_ready.set()
                 time.sleep(0.05)
-                self._start_pipeline()
+                try:
+                    self._start_pipeline()
+                except Exception as exc2:  # noqa: BLE001 - device gone (unplugged?)
+                    # Keep the thread alive and keep trying every few seconds, so a
+                    # camera that comes back (re-enumerates, gets replugged) recovers
+                    # without restarting the server. read() keeps raising meanwhile.
+                    with self._frame_lock:
+                        self._last_capture_error = exc2
+                    if self._stop_event.wait(3.0):
+                        break
 
     def _start_pipeline(self):
         rs = self._rs

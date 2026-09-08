@@ -175,9 +175,12 @@ colour pad window** (not the terminal — this catches everyone out):
 
 | Key | Action |
 |---|---|
-| `s` | start recording an episode |
-| `a` | end and **save** |
-| `b` | end and **discard** |
+| **Enter** | start recording an episode |
+| `s` | end and **save** |
+| `d` | end and **discard** |
+
+On Ctrl-C or a crash: an episode you already pressed `s` on is finalised before
+exit; the take in progress (never saved) is discarded automatically.
 
 Episodes land in `/home/evan/yam_data/put_pen_in_bag/NNNNNN/`: per-frame JSON,
 `meta.json` (intrinsics, depth scale, roles), `*_rgb/` JPEG q95 and `*_depth/`

@@ -39,3 +39,20 @@ def test_full_render_is_fast():
         kb._render_dashboard(d)
     per = (time.perf_counter() - t) / 5 * 1e3
     assert per < 25, f"dashboard render {per:.1f} ms (was ~55 ms with surfarray+smoothscale)"
+
+
+def test_key_bindings_enter_s_d():
+    import pygame
+
+    kb = KBReset()
+    d = _data()
+
+    def press(key):
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key))
+        return kb.update(d)
+
+    assert press(pygame.K_RETURN) == "start"
+    assert press(pygame.K_KP_ENTER) == "start"
+    assert press(pygame.K_s) == "save"
+    assert press(pygame.K_d) == "discard"
+    assert press(pygame.K_a) == "normal" and press(pygame.K_b) == "normal"  # old keys do nothing

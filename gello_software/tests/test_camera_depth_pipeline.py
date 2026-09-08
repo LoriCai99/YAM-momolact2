@@ -49,7 +49,7 @@ def _cams():
 
 def test_snapshot_has_depth_and_timestamps():
     snap = CameraServer(_cams(), rep_endpoint="inproc://x")._snapshot()
-    assert set(snap) == {"ok", "frames", "depth", "timestamps"}
+    assert set(snap) == {"ok", "frames", "depth", "timestamps", "stale"}
     assert snap["depth"]["left_camera"].dtype == np.uint16 and snap["depth"]["left_camera"].shape == (H, W)
     assert snap["frames"]["front_camera"].shape == (H, W, 3)
     assert abs(time.time() - snap["timestamps"]["front_camera"]) < 1.0
@@ -228,3 +228,60 @@ def test_event_driven_pub_waits_for_all_cameras():
     assert s._all_cameras_advanced(last) is False       # only one camera advanced
     cams["front_camera"].frame_count = 1
     assert s._all_cameras_advanced(last) is True        # all advanced
+
+
+class _FlakyCam(FakeCam):
+    """Serves N frames, then raises like a stalled RealSense."""
+
+    def __init__(self, serial, scale, good_reads):
+        super().__init__(serial, scale)
+        self.good_reads = good_reads
+
+    def read(self):
+        if self.good_reads <= 0:
+            raise RuntimeError("RealSense frame is stale (0.9s old); camera may be stalled.")
+        self.good_reads -= 1
+        return super().read()
+
+
+def test_one_stalled_camera_does_not_stop_publishing():
+    cams = {"left_camera": _FlakyCam("L1", 1e-4, good_reads=1), "front_camera": FakeCam("F1", 1e-3)}
+    s = CameraServer(cams, rep_endpoint="inproc://s")
+    first = s._snapshot()
+    assert first["stale"] == []
+    second = s._snapshot()  # left now raises -> served from last good, flagged
+    assert second["stale"] == ["left_camera"]
+    assert second["frames"]["left_camera"].shape == (H, W, 3) and second["frames"]["front_camera"].shape == (H, W, 3)
+    assert second["timestamps"]["left_camera"] == first["timestamps"]["left_camera"]  # old timestamp kept
+    assert s._snapshot_multipart()[0]  # header still builds
+
+
+def test_robot_env_marks_stale_cameras_instead_of_raising():
+    class _Client:
+        def get_obs_full(self):
+            old = time.time() - 2.0
+            return {"frames": {"left_camera": np.zeros((H, W, 3), np.uint8), "front_camera": np.zeros((H, W, 3), np.uint8)},
+                    "depth": {}, "timestamps": {"left_camera": old, "front_camera": time.time()}, "stale": ["left_camera"]}
+
+        def get_meta(self):
+            return {}
+
+    env = RobotEnv(_Robot(), control_rate_hz=30, camera_client=_Client())
+    obs = env.get_obs()
+    assert obs["camera_stale"] == ["left_camera"]
+    assert obs["front_camera_rgb"].shape == (H, W, 3)
+
+
+def test_stream_client_only_aborts_when_server_goes_silent(running_pub_server):
+    from gello.cameras.camera_client import CameraClientError, CameraStreamClient
+
+    rep, pub, _ = running_pub_server
+    c = CameraStreamClient(rep, pub, request_timeout_ms=2000, stream_timeout_sec=0.6)
+    try:
+        c.get_obs_full()
+        c._stop.set(); c._thread.join(timeout=1)   # simulate the server going silent
+        time.sleep(0.8)
+        with pytest.raises(CameraClientError, match="stopped publishing"):
+            c.get_obs_full()
+    finally:
+        c.close()

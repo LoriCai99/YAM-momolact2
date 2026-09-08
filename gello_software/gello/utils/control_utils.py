@@ -280,12 +280,12 @@ def run_control_loop_prior(
             message = f"\rTime passed: {round(num, 2)}     "
             print(message, end="", flush=True)
 
-        logger.info(f"Press 's' to start collecting data: ")
+        logger.info(f"Press Enter to start collecting data: ")
         while True:
             dashboard_data = build_dashboard_data(
                 obs=obs,
                 phase="waiting_start",
-                status_text="Press S to start collecting",
+                status_text="Press Enter to start collecting",
                 traj_idx=num_traj,
                 total_traj=left_cfg['storage']['episodes'],
                 step_idx=0,
@@ -293,12 +293,12 @@ def run_control_loop_prior(
             )
             result = kb_interface.update(dashboard_data)
             if result == "start":
-                logger.info(f"Successfully pressed 's', starting to collect data")
+                logger.info(f"Enter pressed, starting to collect data")
                 time.sleep(1)
                 obs = env.get_obs()
                 env.set_dynamic_offset(agent.act(obs))
                 break
-        logger.info(f"Press 'a' to save the data, press 'b' to discard the data")
+        logger.info(f"Press 's' to save the episode, 'd' to discard it")
 
         result = "normal"
         max_episode_length = left_cfg['collection']['max_episode_length']
@@ -306,10 +306,12 @@ def run_control_loop_prior(
             range(max_episode_length),
             desc=f"Collecting data {num_traj}/{left_cfg['storage']['episodes']}",
         ):
+            _stale = obs.get("camera_stale") or []
             dashboard_data = build_dashboard_data(
                 obs=obs,
                 phase="collecting",
-                status_text="Collecting... Press A to save, B to discard",
+                status_text=("!! CAMERA STALE: " + ", ".join(_stale) + " -- consider D (discard)") if _stale
+                            else "Collecting... [S] save   [D] discard",
                 traj_idx=num_traj,
                 total_traj=left_cfg['storage']['episodes'],
                 step_idx=step_idx + 1,

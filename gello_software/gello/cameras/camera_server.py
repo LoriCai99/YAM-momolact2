@@ -96,6 +96,11 @@ class CameraServer:
         self._req_total = 0
         self._req_window = 0
         self._last_heartbeat = time.time()
+        # Last good (image, depth, ts) per camera: a stalled camera must not stop
+        # the other two from being published (2026-09-08: one D405 stalled, the
+        # whole PUB stream stopped, the collection loop died mid-episode).
+        self._last_good: Dict[str, Any] = {}
+        self._stale_logged: Dict[str, float] = {}
 
     # ------------------------------------------------------------------
     # Frame sourcing
@@ -112,17 +117,31 @@ class CameraServer:
         frames: Dict[str, Any] = {}
         depth: Dict[str, Any] = {}
         timestamps: Dict[str, float] = {}
+        stale: list = []
         for name, cam in self.cameras.items():
-            image, d = cam.read()
+            try:
+                image, d = cam.read()
+                ts = getattr(cam, "last_frame_timestamp", None)
+                if ts is None:
+                    ts = getattr(cam, "_latest_frame_timestamp", None)
+                ts = float(ts or 0.0)
+                self._last_good[name] = (image, d, ts)
+            except Exception as exc:  # noqa: BLE001 - stalled/disconnected camera
+                last = self._last_good.get(name)
+                if last is None:
+                    raise  # never produced a frame: nothing to serve for it
+                image, d, ts = last
+                stale.append(name)
+                now = time.time()
+                if now - self._stale_logged.get(name, 0.0) > 2.0:
+                    logger.warning("camera %s stalled (%s); serving its last frame (%.1fs old)", name, str(exc).splitlines()[0][:70], now - ts)
+                    self._stale_logged[name] = now
             frames[name] = image
             if d is not None:
                 depth[name] = d[:, :, 0] if getattr(d, "ndim", 2) == 3 else d
             # Surface the capture timestamp so the client can detect staleness.
-            ts = getattr(cam, "last_frame_timestamp", None)
-            if ts is None:
-                ts = getattr(cam, "_latest_frame_timestamp", None)
-            timestamps[name] = float(ts or 0.0)
-        return {"ok": True, "frames": frames, "depth": depth, "timestamps": timestamps}
+            timestamps[name] = ts
+        return {"ok": True, "frames": frames, "depth": depth, "timestamps": timestamps, "stale": stale}
 
     def _snapshot_multipart(self) -> list:
         """``obs2`` payload: a JSON header frame followed by one raw buffer per array.
@@ -132,7 +151,7 @@ class CameraServer:
         twice and cost the collection loop ~20 ms per tick.
         """
         snap = self._snapshot()
-        header: Dict[str, Any] = {"ok": True, "v": 2, "cams": [], "timestamps": snap["timestamps"]}
+        header: Dict[str, Any] = {"ok": True, "v": 2, "cams": [], "timestamps": snap["timestamps"], "stale": snap.get("stale", [])}
         parts: list = []
         for name, rgb in snap["frames"].items():
             rgb = np.ascontiguousarray(rgb)

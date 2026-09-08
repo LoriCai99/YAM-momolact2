@@ -11,11 +11,13 @@ GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 BLACK = (0, 0, 0)
 
-KEY_START = pygame.K_s
+# Enter starts an episode, S saves it, D discards it (changed 2026-09-08 from
+# S/A/B: 'a' and 'b' next to each other cost real takes).
+KEY_START = (pygame.K_RETURN, pygame.K_KP_ENTER)
 # KEY_CONTINUE = pygame.K_c
 KEY_QUIT_RECORDING = pygame.K_q
-KEY_SAVE = pygame.K_a
-KEY_DISCARD = pygame.K_b
+KEY_SAVE = (pygame.K_s,)
+KEY_DISCARD = (pygame.K_d,)
 
 
 class KBReset:
@@ -58,17 +60,17 @@ class KBReset:
     #     return "normal"
     def update(self, dashboard_data: Optional[Dict[str, Any]] = None) -> str:
         pressed_last = self._get_pressed()
-        if KEY_START in pressed_last:
+        if any(k in pressed_last for k in KEY_START):
             self._show_popup("Operation: start")
             if dashboard_data is not None:
                 self._render_dashboard(dashboard_data)
             return "start"
-        if KEY_SAVE in pressed_last:
+        if any(k in pressed_last for k in KEY_SAVE):
             self._show_popup("Operation: save")
             if dashboard_data is not None:
                 self._render_dashboard(dashboard_data)
             return "save"
-        if KEY_DISCARD in pressed_last:
+        if any(k in pressed_last for k in KEY_DISCARD):
             self._show_popup("Operation: delete")
             if dashboard_data is not None:
                 self._render_dashboard(dashboard_data)
@@ -138,7 +140,7 @@ class KBReset:
             f"Phase: {phase}",
             f"Trajectory: {traj_idx}/{total_traj}",
             f"Observations collected: {obs_count}",
-            "Controls: [S] start  [A] save  [B] discard",
+            "Controls: [Enter] start   [S] save   [D] discard",
         ]
         if status:
             header_lines.append(f"Status: {status}")

@@ -59,6 +59,8 @@ class RobotEnv:
             n = robot.num_dofs()
             gripper_indices = tuple(range(6, n, 7)) if n % 7 == 0 else ()
         self._gripper_indices = tuple(int(i) for i in gripper_indices)
+        # A camera whose latest frame is older than this is reported in obs['camera_stale'].
+        self.camera_stale_sec = 0.5
         self._rate = Rate(control_rate_hz)
         self._camera_dict = {} if camera_dict is None else camera_dict
         # When set, get_obs() pulls images from the camera server over ZMQ
@@ -160,8 +162,15 @@ class RobotEnv:
                     observations[f"{name}_rgb"] = image
                 for name, depth in (resp.get("depth") or {}).items():
                     observations[f"{name}_depth"] = depth if depth.ndim == 3 else depth[:, :, None]
+                now = time.time()
+                stale = set(resp.get("stale") or [])
                 for name, ts in (resp.get("timestamps") or {}).items():
                     observations[f"{name}_timestamp"] = float(ts)
+                    if ts and now - float(ts) > self.camera_stale_sec:
+                        stale.add(name)
+                # Non-empty => those cameras are serving an old frame. The loop shows
+                # it, the recorder logs it per frame, QC flags the episode.
+                observations["camera_stale"] = sorted(stale)
             else:  # older client: RGB only
                 for name, image in self._camera_client.get_obs().items():
                     observations[f"{name}_rgb"] = image

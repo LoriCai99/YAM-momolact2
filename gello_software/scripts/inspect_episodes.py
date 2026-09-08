@@ -85,6 +85,13 @@ def inspect(ep: str, fps_nominal: float = 30.0) -> bool:
         if dup > 0.15 * T:
             line += "  WARN: >15% duplicated frames"; ok = False
         print(line)
+    stale_n = sum(1 for r in rows if r.get("camera_stale"))
+    if stale_n:
+        runs, cur = [], 0
+        for r in rows:
+            cur = cur + 1 if r.get("camera_stale") else 0
+            runs.append(cur)
+        print(f"  WARN: {stale_n} frames ({100*stale_n/T:.1f}%) had a stale camera; longest stall {max(runs)/fps_nominal:.1f}s"); ok = False
     if m.get("image_write_errors"):
         print(f"  WARN: image write errors: {m['image_write_errors'][:2]}"); ok = False
     print(f"  => {'OK' if ok else 'CHECK WARNINGS'}")
