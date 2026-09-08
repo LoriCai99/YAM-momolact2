@@ -723,7 +723,37 @@ def main():
     print("All tasks completed.")
 
 
+class _Tee:
+    """Mirror stdout/stderr to a log file so a crashed session can be diagnosed
+    without a pasted terminal."""
+
+    def __init__(self, stream, path):
+        self._s = stream
+        self._f = open(path, "a", buffering=1)
+
+    def write(self, data):
+        self._s.write(data)
+        try:
+            self._f.write(data)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def flush(self):
+        self._s.flush()
+        try:
+            self._f.flush()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._s, name)
+
+
 if __name__ == "__main__":
+    _log_path = os.path.join(tempfile.gettempdir(), f"yam_collect_{os.getpid()}.log")
+    sys.stdout = _Tee(sys.stdout, _log_path)
+    sys.stderr = _Tee(sys.stderr, _log_path)
+    print(f"(session log: {_log_path})")
     try:
         main()
     except SystemExit:

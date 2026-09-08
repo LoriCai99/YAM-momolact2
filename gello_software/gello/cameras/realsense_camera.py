@@ -160,16 +160,38 @@ class RealSenseCamera(CameraDriver):
                 if consecutive_failures >= self._max_read_attempts:
                     self._frame_ready.set()
                 time.sleep(0.05)
+                # pipeline.start() on a device that is NOT enumerated blocks ~5 s
+                # inside librealsense ("Failed to reconnect: No device connected5000")
+                # while HOLDING THE GIL -- which froze the whole camera server,
+                # healthy cameras included, for 10+ s on 2026-09-08. Only attempt a
+                # restart once the device is back on the bus; poll cheaply meanwhile.
+                if not self._device_present():
+                    with self._frame_lock:
+                        self._last_capture_error = RuntimeError(
+                            f"camera {self._device_id} is not enumerated (disconnected?)"
+                        )
+                    if self._stop_event.wait(1.0):
+                        break
+                    continue
                 try:
                     self._start_pipeline()
-                except Exception as exc2:  # noqa: BLE001 - device gone (unplugged?)
-                    # Keep the thread alive and keep trying every few seconds, so a
-                    # camera that comes back (re-enumerates, gets replugged) recovers
-                    # without restarting the server. read() keeps raising meanwhile.
+                except Exception as exc2:  # noqa: BLE001
                     with self._frame_lock:
                         self._last_capture_error = exc2
-                    if self._stop_event.wait(3.0):
+                    if self._stop_event.wait(2.0):
                         break
+
+    def _device_present(self) -> bool:
+        """Is this serial currently enumerated? Milliseconds, no long blocking call."""
+        if self._device_id is None:
+            return True
+        try:
+            for dev in self._rs.context().query_devices():
+                if dev.get_info(self._rs.camera_info.serial_number) == self._device_id:
+                    return True
+        except Exception:  # noqa: BLE001
+            return False
+        return False
 
     def _start_pipeline(self):
         rs = self._rs
@@ -206,6 +228,8 @@ class RealSenseCamera(CameraDriver):
                     msg = str(exc)
                     if "resolve requests" in msg:
                         raise  # a mode/USB-link problem: retrying will not help
+                    if not self._device_present():
+                        raise RuntimeError(f"camera {self._device_id} disconnected during start: {msg.splitlines()[0][:80]}")
                     last_exc = exc
                     logger.warning(
                         "camera %s start attempt %d/5 failed (%s); retrying",

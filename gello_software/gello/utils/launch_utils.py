@@ -217,7 +217,10 @@ def move_to_start_position(
             return
         reset_joints = np.array(left_cfg["agent"]["start_joints"])
 
-    curr_joints = env.get_obs()["joint_positions"]
+    # Robot-only reads/commands: homing must work when the cameras are the thing
+    # that is broken (Ctrl-C after a camera drop used to skip homing and the arms
+    # were left wherever they were when the watchdog cut power).
+    curr_joints = env.get_robot_state()["joint_positions"]
     if reset_joints.shape != curr_joints.shape:
         print("Warning: Mismatch in joint shapes, skipping move_to_start_position.")
         return
@@ -227,8 +230,7 @@ def move_to_start_position(
 
     print(f"Moving robot to start position: {reset_joints}")
     for jnt in np.linspace(curr_joints, reset_joints, steps):
-        env.step(jnt, reset=True)
-        time.sleep(0.001)
+        env.step_command_only(jnt, reset=True)
 
 
 def instantiate_from_dict(cfg):
