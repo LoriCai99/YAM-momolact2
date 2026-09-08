@@ -1,19 +1,22 @@
 robot:
   _target_: gello.robots.yam.YAMRobot
-  # can0 = RIGHT arm -- VERIFIED 2026-09-02 (hand-moving the LEFT arm showed up
-  # on can1 only; can0 stayed at its noise floor). See yam_left.yaml.
-  channel: can0
+  # can1 = RIGHT arm. VERIFIED 2026-09-08 with scripts/identify_sides.py (moving
+  # the right arm by hand moved can1 only). See yam_left.yaml.
+  channel: can1
 agent:
   _target_: gello.agents.gello_agent.GelloAgent
-  # VERIFIED 2026-09-08 during teleop: FTAO9WPU is the leader on the operator's
-  # RIGHT (Dynamixel IDs [1..7] at 57600). See the note in yam_left.yaml.
-  port: /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTAO9WPU-if00-port0
+  # VERIFIED 2026-09-08 with scripts/identify_sides.py: FTAO9WCV is the leader on
+  # the operator's RIGHT (Dynamixel IDs [8..14] at 57600).
+  port: /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTAO9WCV-if00-port0
   dynamixel_config:
     _target_: gello.agents.gello_agent.DynamixelRobotConfig
-    joint_ids: [1, 2, 3, 4, 5, 6]
+    joint_ids: [8, 9, 10, 11, 12, 13]
     joint_offsets: [3.14159, 3.14159, 3.14159, 3.14159, 3.14159, 3.14159]
-    joint_signs: [1.0, -1.0, -1.0, -1.0, 1.0, 1.0]
-    gripper_config: [7, 55.869140625, 108.369140625]
+    joint_signs: [1.0, -1.0, 1.0, -1.0, 1.0, 1.0]
+    # NOTE: this leader's trigger rests at ~113 deg, past the 108.37 closed bound
+    # below, so the gripper command saturates (right gripper pinned closed).
+    # Recalibrate with:  python scripts/calibrate_gripper.py --side right
+    gripper_config: [14, 55.869140625, 108.369140625]
   start_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 hz: 30
 max_steps: 1000

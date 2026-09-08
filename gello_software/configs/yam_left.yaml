@@ -26,29 +26,25 @@ sensors:
 robot:
   _target_: gello.robots.yam.YAMRobot
   # This workstation exposes plain can0/can1 (no udev naming rules).
-  # can1 = LEFT arm -- VERIFIED 2026-09-02 by hand-moving the left arm with the
-  # motors de-energized and diffing joint positions on both buses: can1 shifted
-  # up to 0.046 rad on joints 1/5/6 while can0 stayed at its 0.0004 rad noise
-  # floor. (Agrees with /home/evan/carter/configs; that repo's STATUS.md claims
-  # the opposite mapping and is stale.)
-  channel: can1
+  # can0 = LEFT arm. VERIFIED 2026-09-08 with scripts/identify_sides.py: moving
+  # the RIGHT arm by hand changed can1 only (0.170 rad), can0 stayed at its noise
+  # floor. The 2026-09-02 note that claimed can1 = left came from a wiggle test
+  # that was performed on the right arm. /home/evan/carter/STATUS.md (can0 = left)
+  # was right all along.
+  channel: can0
 agent:
   _target_: gello.agents.gello_agent.GelloAgent
-  # VERIFIED 2026-09-08 during teleop: FTAO9WCV is the leader on the operator's
-  # LEFT (it answers at 57600 with Dynamixel IDs [8..14]). The shipped configs
-  # had the two leaders crossed -- left leader drove the right follower.
-  # joint_ids / joint_signs / gripper_config belong to this leader's hardware
-  # and were swapped together with the port. Re-check with scripts/ping_gello.py.
-  port: /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTAO9WCV-if00-port0
+  # VERIFIED 2026-09-08 with scripts/identify_sides.py: FTAO9WPU is the leader on
+  # the operator's LEFT (Dynamixel IDs [1..7] at 57600; moving the RIGHT leader
+  # changed FTAO9WCV only). joint_ids / joint_signs / gripper_config describe this
+  # leader's hardware and travel with the port. Re-check: scripts/identify_sides.py
+  port: /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTAO9WPU-if00-port0
   dynamixel_config:
     _target_: gello.agents.gello_agent.DynamixelRobotConfig
-    joint_ids: [8, 9, 10, 11, 12, 13]
+    joint_ids: [1, 2, 3, 4, 5, 6]
     joint_offsets: [3.14159, 3.14159, 3.14159, 3.14159, 3.14159, 3.14159]
-    joint_signs: [1.0, -1.0, 1.0, -1.0, 1.0, 1.0]
-    # NOTE: this leader's trigger rests at ~113 deg, past the 108.37 closed bound
-    # below, so the gripper command saturates. Recalibrate with
-    #   python scripts/calibrate_gripper.py --side left
-    gripper_config: [14, 55.869140625, 108.369140625]
+    joint_signs: [1.0, -1.0, -1.0, -1.0, 1.0, 1.0]
+    gripper_config: [7, 55.869140625, 108.369140625]
   start_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 hz: 30
 max_steps: 1000
