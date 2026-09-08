@@ -27,6 +27,8 @@ class YAMRobot(Robot):
     def __init__(self, channel="can0", connect_attempts: int = 3, retry_delay_s: float = 1.0):
         from i2rt.robots.get_robot import get_yam_robot
 
+        self._channel = channel
+
         self._widen_handshake_window(self.HANDSHAKE_RETRIES)
         # Belt and braces: a genuinely dead motor still fails, just with a clearer
         # message that names what to check physically.
@@ -69,8 +71,22 @@ class YAMRobot(Robot):
     def num_dofs(self) -> int:
         return 7  # YAM has 7 DOFs
 
+    def is_alive(self) -> bool:
+        """False once i2rt's control loop has stopped (motor watchdog / lost comms)."""
+        chain = getattr(self.robot, "motor_chain", None)
+        return bool(getattr(chain, "running", True))
+
+    def _assert_alive(self) -> None:
+        if not self.is_alive():
+            raise RuntimeError(
+                f"{self._channel}: the arm's control loop has stopped (motor watchdog tripped or "
+                f"CAN comms lost). Joint state is frozen -- refusing to record it as real data. "
+                f"Reset CAN and relaunch."
+            )
+
     def get_joint_state(self) -> np.ndarray:
         # Get actual joint positions from I2RT robot (7 joints total)
+        self._assert_alive()
         joint_pos = self.robot.get_joint_pos()
         # Ensure we have exactly 7 joints
         if len(joint_pos) > 7:

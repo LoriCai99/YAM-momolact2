@@ -253,6 +253,7 @@ consumes. `lerobot.auto_convert` stays false.
 | `Device or resource busy` on a camera | Something else holds it | `ps aux \| grep camera_server`; `sudo fuser -v /dev/video*` |
 | A D405 vanishes from USB | ASMedia controller `05:00.0` dropping devices | `echo 1 \| sudo tee /sys/bus/pci/devices/0000:05:00.0/remove && echo 1 \| sudo tee /sys/bus/pci/rescan` |
 | Permission denied on `/dev/ttyUSB*` | `dialout` not active in this shell | `sg dialout -c "..."`, or log out and back in |
+| Both arms go limp right after launch; log shows `fail to communicate with the motor 1` / `loss communication` | Arms constructed while cameras + leaders already load the process (GIL stall > 400 ms watchdog) | Fixed in the launcher (arms built first). If it recurs, check nothing else heavy runs in-process before the robots |
 | Session dies with `loss communication` | `enable_auto_recovery` defaults to False (fail-fast) | Restart. Already-saved episodes are intact |
 | Right gripper stuck closed | Gripper calibration saturating (leader `FTAO9WCV`) | §6.5 |
 

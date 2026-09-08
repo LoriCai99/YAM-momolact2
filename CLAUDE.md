@@ -98,6 +98,19 @@ Written while bringing this workstation up; all live in `gello_software/scripts/
 - **`DynamixelDriver` can deadlock on sudo.** `_fix_port_permissions()` shells `sudo chmod 666` with `capture_output=True`, so it blocks forever on the password prompt. Also `use_fake_fallback=True` is the default, so some failure paths silently substitute a fake leader stuck at zeros.
 - **`online motors: []` usually means the CAN interface went down, not dead arms.** A USB re-enumeration leaves `can0`/`can1` DOWN; `cansend can1 001#11` then reports `Network is down`. Fix with `bash i2rt/scripts/reset_all_can.sh` — run it immediately before every launch. Distinguish from unpowered arms: unpowered gives `No buffer space available` (nothing ACKs, TX queue wedges) rather than `Network is down`.
 
+## Construction order: arms before leaders and cameras (2026-09-08)
+
+`get_yam_robot()` starts an arm's 250 Hz chain thread and *then* loads the MuJoCo model and
+auto-calibrates the gripper on the main thread. If camera capture threads and Dynamixel
+readers are already running, that GIL stall exceeds the 400 ms motor watchdog and the arm
+goes limp during construction (`fail to communicate with the motor 1` → `loss
+communication` → `motor chain is not running`). Reproduced deterministically; every isolated
+load was fine, only the combination killed it. `launch_yaml_collect_data.py` therefore builds
+the robots first, in a quiet process, then opens leaders and cameras — the same principle the
+eval launcher uses for the policy load. Keep it that way in any new launcher. `YAMRobot`
+also widens i2rt's 5×10 ms power-on handshake (misses replies under the same contention) and
+raises if its chain has died, so frozen joints are never recorded as data.
+
 ## flex-pi data pipeline (added 2026-09-08)
 
 The team finetunes **flex-pi** (`flex-pi/soft_bag_zipping` is literally this task). Read

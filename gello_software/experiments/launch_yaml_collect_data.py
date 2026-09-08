@@ -430,23 +430,7 @@ def main():
     )
     kb_interface = KBReset()
 
-    camera_cfg = left_cfg["sensors"]["cameras"]
-    cameras = _open_cameras(camera_cfg)
-    # Register for cleanup NOW: if robot construction below raises (e.g. a motor
-    # not answering), the atexit handler must still stop the capture threads, or
-    # librealsense aborts/segfaults at interpreter exit.
-    _cameras = cameras
 
-    # Create agent
-    if bimanual:
-        from gello.agents.agent import BimanualAgent
-
-        agent = BimanualAgent(
-            agent_left=instantiate_from_dict(left_cfg["agent"]),
-            agent_right=instantiate_from_dict(right_cfg["agent"]),
-        )
-    else:
-        agent = instantiate_from_dict(left_cfg["agent"])
 
     # Create robot(s)
     left_robot_cfg = left_cfg["robot"]
@@ -526,6 +510,31 @@ def main():
 
         # Create client to communicate with hardware
         robot_client = ZMQClientRobot(port=hardware_port, host=hardware_host)
+
+    # ---- Order matters: arms FIRST, then leaders, then cameras. ------------------
+    # i2rt starts each arm's 250 Hz chain thread and then loads the MuJoCo model /
+    # auto-calibrates the gripper on the main thread. In a quiet process that stall
+    # stays under the motors' 400 ms watchdog; with three camera capture threads and
+    # two Dynamixel readers already contending for the GIL it does not, and both arms
+    # went limp during construction every time (2026-09-08). Built first in a quiet
+    # process, they survived a 25 s soak under the full recording load.
+    # Create agent
+    if bimanual:
+        from gello.agents.agent import BimanualAgent
+
+        agent = BimanualAgent(
+            agent_left=instantiate_from_dict(left_cfg["agent"]),
+            agent_right=instantiate_from_dict(right_cfg["agent"]),
+        )
+    else:
+        agent = instantiate_from_dict(left_cfg["agent"])
+
+    camera_cfg = left_cfg["sensors"]["cameras"]
+    cameras = _open_cameras(camera_cfg)
+    # Register for cleanup NOW: if robot construction below raises (e.g. a motor
+    # not answering), the atexit handler must still stop the capture threads, or
+    # librealsense aborts/segfaults at interpreter exit.
+    _cameras = cameras
 
     env = RobotEnv(robot_client, control_rate_hz=cfg.get("hz", 30), camera_dict=cameras)
     # Intrinsics + depth scale per camera go into every episode's meta.json.
