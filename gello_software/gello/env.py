@@ -8,13 +8,34 @@ from gello.robots.robot import Robot
 
 
 class Rate:
+    """Fixed-schedule rate limiter: the average period is exactly 1/rate.
+
+    The previous version measured each period from the END of the previous
+    sleep, so every tick carried the sleep-granularity overshoot (~0.5 ms) and
+    the collection loop settled at 29.2 Hz instead of 30 (tick p50 34.0 ms).
+    Ticks are now scheduled on an absolute timeline: a tick that finishes late
+    is followed by a shorter sleep, so the mean holds. If the loop falls more
+    than one full period behind (a real stall), the schedule is re-based
+    instead of firing a burst of catch-up ticks.
+    """
+
     def __init__(self, rate: float):
-        self.last = time.time()
         self.rate = rate
+        self.period = 1.0 / rate
+        self.next = time.perf_counter() + self.period
+        self.last = time.time()  # kept for callers that read it
 
     def sleep(self) -> None:
-        while self.last + 1.0 / self.rate > time.time():
-            time.sleep(0.0001)
+        now = time.perf_counter()
+        remaining = self.next - now
+        if remaining < -self.period:
+            self.next = now + self.period  # stalled: re-base rather than burst
+        else:
+            if remaining > 0.002:
+                time.sleep(remaining - 0.0015)  # coarse sleep, then a short accurate spin
+            while time.perf_counter() < self.next:
+                time.sleep(0.0001)
+            self.next += self.period
         self.last = time.time()
 
 
