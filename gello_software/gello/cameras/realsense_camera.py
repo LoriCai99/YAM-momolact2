@@ -228,6 +228,14 @@ class RealSenseCamera(CameraDriver):
                     msg = str(exc)
                     if "resolve requests" in msg:
                         raise  # a mode/USB-link problem: retrying will not help
+                    # A failure inside warm-up leaves the pipeline STARTED; a retry
+                    # then fails with "start() cannot be called before stop()". Tear
+                    # it down and build a fresh pipeline before the next attempt.
+                    try:
+                        self._pipeline.stop()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._pipeline = rs.pipeline()
                     if not self._device_present():
                         raise RuntimeError(f"camera {self._device_id} disconnected during start: {msg.splitlines()[0][:80]}")
                     last_exc = exc
