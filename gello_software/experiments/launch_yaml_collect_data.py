@@ -381,6 +381,8 @@ def run_post_collection_pipeline(cfg: dict) -> None:
     print("Post-collection pipeline completed successfully.")
 
 def main():
+    global _env, _bimanual, _left_cfg, _right_cfg
+    global _agent, _robot, _robot_client, _cameras, _data_saver, _kb_interface
     # Register cleanup handlers
     # If terminated without cleanup, can leave ZMQ sockets bound causing "address in use" errors or resource leaks
 
@@ -433,7 +435,6 @@ def main():
     # Register for cleanup NOW: if robot construction below raises (e.g. a motor
     # not answering), the atexit handler must still stop the capture threads, or
     # librealsense aborts/segfaults at interpreter exit.
-    global _cameras
     _cameras = cameras
 
     # Create agent
@@ -538,8 +539,6 @@ def main():
         )
 
     # Store global variables for cleanup
-    global _env, _bimanual, _left_cfg, _right_cfg
-    global _agent, _robot, _robot_client, _cameras, _data_saver, _kb_interface
     _env = env
     _bimanual = bimanual
     _left_cfg = left_cfg
