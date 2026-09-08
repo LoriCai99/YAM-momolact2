@@ -14,6 +14,37 @@ logger = logging.getLogger(__name__)
 STREAM_WIDTH, STREAM_HEIGHT, STREAM_FPS = 640, 360, 30
 
 
+def probe_frames(serial: str, width: int = STREAM_WIDTH, height: int = STREAM_HEIGHT, fps: int = STREAM_FPS,
+                 timeout_s: float = 3.0) -> dict:
+    """Actually start the required streams and wait for ONE frameset.
+
+    A camera can enumerate at USB 3 and advertise every mode yet deliver no frames
+    (left D405, 2026-09-08, after 60+ USB disconnects in a day). The mode-list check
+    passes such a camera and the server then dies ~35 s later. This catches it in
+    the pre-flight. Returns {"ok", "reason", "seconds"}.
+    """
+    import pyrealsense2 as rs
+
+    p, c = rs.pipeline(), rs.config()
+    c.enable_device(serial)
+    c.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
+    c.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
+    t0 = time.time()
+    try:
+        p.start(c)
+        ok, fs = p.try_wait_for_frames(int(timeout_s * 1000))
+        if not ok or not fs.get_color_frame() or not fs.get_depth_frame():
+            return {"ok": False, "reason": f"NO FRAMES within {timeout_s:.0f}s (enumerates but does not stream)", "seconds": time.time() - t0}
+        return {"ok": True, "reason": "ok", "seconds": time.time() - t0}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": f"start failed: {str(exc).splitlines()[0][:70]}", "seconds": time.time() - t0}
+    finally:
+        try:
+            p.stop()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def check_stream_support(serial: str, width: int = STREAM_WIDTH, height: int = STREAM_HEIGHT,
                          fps: int = STREAM_FPS) -> dict:
     """Can this device deliver colour bgr8 + depth z16 at (width, height, fps)?

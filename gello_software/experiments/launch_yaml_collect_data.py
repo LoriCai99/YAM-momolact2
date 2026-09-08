@@ -28,6 +28,7 @@ from gello.cameras.realsense_camera import (
     STREAM_WIDTH,
     RealSenseCamera,
     check_stream_support,
+    probe_frames,
     get_device_ids,
 )
 from gello.data_utils.data_saver import DataSaver
@@ -154,8 +155,15 @@ def _preflight_cameras(camera_cfg: dict) -> None:
     """
     roles = CAMERA_ROLES
     report = {r: check_stream_support(camera_cfg[r]["device_id"]) for r in roles}
+    # Mode list says "could stream"; a frame probe says "does stream". Both must pass.
+    for r, v in report.items():
+        if v["ok"]:
+            pr = probe_frames(camera_cfg[r]["device_id"])
+            if not pr["ok"]:
+                v["ok"] = False
+                v["reason"] = pr["reason"]
     bad = {r: v for r, v in report.items() if not v["ok"]}
-    print(f"Camera pre-flight (need colour+depth {STREAM_WIDTH}x{STREAM_HEIGHT}@{STREAM_FPS}):")
+    print(f"Camera pre-flight (need colour+depth {STREAM_WIDTH}x{STREAM_HEIGHT}@{STREAM_FPS}, and a real frame from each):")
     for r in roles:
         v = report[r]
         print(f"  {r:13} {camera_cfg[r]['device_id']}  USB {v['usb'] or '--':4}  {'OK' if v['ok'] else 'FAIL: ' + v['reason']}")

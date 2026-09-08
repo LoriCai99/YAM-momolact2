@@ -81,9 +81,16 @@ def main() -> None:
                     dep = True
 
         ok = col and dep
+        probe = ""
+        if ok:
+            from gello.cameras.realsense_camera import probe_frames
+            pr = probe_frames(sn)
+            if not pr["ok"]:
+                ok = False
+                probe = pr["reason"]
         ready &= ok
-        verdict = "ok" if ok else ("USB2 LINK -- move to a USB 3 port"
-                                   if usb.startswith("2") else "mode unsupported")
+        verdict = "ok" if ok else (probe or ("USB2 LINK -- move to a USB 3 port"
+                                             if usb.startswith("2") else "mode unsupported"))
         print(f"{role:14}{sn:16}{usb:6}{'YES' if col else 'NO':>8}{'YES' if dep else 'NO':>8}   {verdict}")
 
     print("-" * 64)
