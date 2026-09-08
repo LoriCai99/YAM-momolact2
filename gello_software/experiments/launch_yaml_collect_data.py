@@ -322,7 +322,6 @@ class Args:
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully."""
     cleanup()
-    import os
 
     os._exit(0)
 
