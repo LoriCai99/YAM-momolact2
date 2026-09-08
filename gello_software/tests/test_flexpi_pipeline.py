@@ -192,3 +192,16 @@ def test_convert_refuses_missing_depth_scale(tmp_path):
     res = fc.convert(tmp_path / "raw", tmp_path / "out", task="x", workers=1, quiet=True, overwrite=True,
                      depth_scale_override={"left": 1e-4, "front": 1e-3, "right": 1e-4})
     assert res["episodes"] == 1
+
+
+def test_gripper_channels_are_clipped_to_unit_interval():
+    """Follower grippers report a few hundredths past their limits when pressed hard
+    (e.g. -0.01 fully closed); flex-pi's range is [0, 1]."""
+    import flexpi_convert as fc
+
+    fk = fc.YamFK("gripper", "grasp_site")
+    q = np.zeros(14)
+    q[6], q[13] = -0.01, 1.02
+    st = fc.joints14_to_state32(q, fk)
+    assert st[18] == 0.0 and st[19] == 1.0
+    assert st[20:26].tolist() == [0.0] * 6  # joints untouched

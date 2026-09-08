@@ -106,7 +106,11 @@ def joints14_to_state32(q14: np.ndarray, fk: YamFK) -> np.ndarray:
     L, R = q14[:7], q14[7:14]
     lp, lr = fk.pose(L[:6])
     rp, rr = fk.pose(R[:6])
-    return np.concatenate([lp, lr, rp, rr, [L[6], R[6]], L[:6], R[:6]]).astype(np.float32)
+    # Grippers are i2rt command-space [0, 1] (1 = open). The follower reports a few
+    # hundredths past its calibrated limits when pressed hard (e.g. -0.01 fully
+    # closed); flex-pi's range is [0, 1], so clip -- it is overshoot, not signal.
+    grip = np.clip([L[6], R[6]], 0.0, 1.0)
+    return np.concatenate([lp, lr, rp, rr, grip, L[:6], R[:6]]).astype(np.float32)
 
 
 # ----------------------------------------------------------------------------- raw episodes

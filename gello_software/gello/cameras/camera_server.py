@@ -312,6 +312,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="PUB payload: pickle (legacy viewer) or multipart zero-copy incl. depth.")
     parser.add_argument("--heartbeat-sec", type=float, default=DEFAULT_HEARTBEAT_SEC)
     parser.add_argument("--log-level", default="INFO")
+    parser.add_argument("--exit-with-parent", action="store_true",
+                        help="Shut down when the launching process exits (child-process mode).")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -328,6 +330,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         heartbeat_sec=args.heartbeat_sec,
         pub_format=args.pub_format,
     )
+    if args.exit_with_parent:
+        import os
+
+        parent = os.getppid()
+
+        def _watch_parent() -> None:
+            while os.getppid() == parent:
+                time.sleep(0.5)
+            logger.info("Parent process %d exited; shutting down.", parent)
+            server.shutdown()
+
+        threading.Thread(target=_watch_parent, name="parent_watch", daemon=True).start()
 
     def _handle(signum, _frame):
         logger.info("Signal %d received; shutting down.", signum)

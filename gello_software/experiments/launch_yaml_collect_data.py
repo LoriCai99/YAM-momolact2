@@ -97,7 +97,7 @@ def _start_camera_server(config_path: str, rep: str, pub: str, log_path: str) ->
     """
     log = open(log_path, "ab", buffering=0)
     cmd = [sys.executable, "-m", "gello.cameras.camera_server", "--config", os.path.abspath(config_path),
-           "--rep-endpoint", rep, "--pub-endpoint", pub, "--pub-format", "multipart"]
+           "--rep-endpoint", rep, "--pub-endpoint", pub, "--pub-format", "multipart", "--exit-with-parent"]
     print(f"Starting camera server: {' '.join(cmd)}\n  (log: {log_path})")
     return subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 
@@ -205,6 +205,16 @@ def cleanup():
     cleanup_in_progress = True
 
     print("Cleaning up resources...")
+    # Camera child + client first: nothing below (arm moves, ZMQ teardown) may raise
+    # and leave a stale server holding the cameras.
+    try:
+        if _camera_client is not None:
+            _call_cleanup_methods(_camera_client, "camera_client", ["close"])
+        if _camera_server_proc is not None:
+            print("Stopping camera server subprocess...")
+            _stop_camera_server(_camera_server_proc)
+    except Exception as e:  # noqa: BLE001
+        print(f"Error stopping camera server: {e}")
     try:
         if _env is not None and _left_cfg is not None:
             if _bimanual:
@@ -242,11 +252,6 @@ def cleanup():
     if isinstance(_cameras, dict):
         for camera_name, camera in _cameras.items():
             _close_realsense_camera(camera, camera_name)
-    if _camera_client is not None:
-        _call_cleanup_methods(_camera_client, "camera_client", ["close"])
-    if _camera_server_proc is not None:
-        print("Stopping camera server subprocess...")
-        _stop_camera_server(_camera_server_proc)
 
     if _kb_interface is not None:
         _call_cleanup_methods(_kb_interface, "kb_interface", ["close", "stop", "shutdown"])
