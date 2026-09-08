@@ -130,8 +130,11 @@ sg dialout -c "python experiments/launch_yaml.py \
 > `start_joints`. **Whatever pose you hold becomes the defined zero.** Launch
 > with a slumped leader and the leader↔follower correspondence is silently wrong.
 
-`ctrl+C` to exit — the command stream stops and the 400 ms watchdog
-de-energizes both arms (LED green→red). No physical power-cut needed.
+`ctrl+C` to exit: the arms first return **gently to the start pose** (interpolated,
+robot-only — it works even when the cameras are what failed), then the process
+exits and the 400 ms watchdog de-energizes both arms (LED green→red). The start
+pose is arm-extended, so expect the arms to sag when torque drops. No physical
+power-cut needed.
 
 ### 5.2 Data collection
 
@@ -279,7 +282,9 @@ consumes. `lerobot.auto_convert` stays false.
 | Both arms go limp right after launch; log shows `fail to communicate with the motor 1` / `loss communication` | Arms constructed while cameras + leaders already load the process (GIL stall > 400 ms watchdog) | Fixed in the launcher (arms built first). If it recurs, check nothing else heavy runs in-process before the robots |
 | Session dies with `loss communication` | `enable_auto_recovery` defaults to False (fail-fast) | Restart. Already-saved episodes are intact |
 | `camera server exited with code …` / `did not answer within 60s` | The child camera server failed to start (cameras busy, USB, bad config) | Read the log path printed at startup; `python scripts/check_cameras.py`; `pkill -f camera_server` if a stale one holds the devices |
-| `camera stream stale` / `no frames received` mid-episode | The camera server stopped publishing (USB drop) | Check its log; the episode is unfinalised (not saved) by design |
+| Pad shows `!! CAMERA STALE: <cam>` mid-episode | That camera stopped delivering frames (USB drop). The loop keeps running; the other cameras keep flowing | Finish the take with `d`. A camera that comes back recovers on its own (~2 s). Frames with a stale camera are logged per row and `inspect_episodes.py` WARNs |
+| `camera server stopped publishing: no frame set for 3.0s` | The whole camera server went silent (process died, or every camera gone) | Read `/tmp/yam_camera_server_<pid>.log` and the session log `/tmp/yam_collect_<pid>.log` |
+| A camera enumerates but streams **0 frames**, or `dmesg` shows repeated `usb 2-N: USB disconnect` for it | Cable / port / camera fault (left D405 on 2026-09-08: 63 disconnects in a day, then 0 frames while enumerated) | Swap its cable with a known-good one, then another port; if it still does not stream, replace the camera. `python scripts/test_camera_drop.py --reset-serial <serial>` validates recovery |
 | Arms jerky during collection | Loop below 30 Hz or GIL contention in the arms' process | Confirm `collection.camera_mode: subprocess` and that the dashboard is not modified to render every tick |
 | Right gripper stuck closed | Gripper calibration saturating (leader `FTAO9WCV`) | §6.5 |
 
