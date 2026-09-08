@@ -1,5 +1,7 @@
+import time
 from typing import Any, Dict, Optional
 
+import cv2
 import numpy as np
 import pygame
 
@@ -27,6 +29,13 @@ class KBReset:
         self._small_font = pygame.font.SysFont("monospace", 16)
         self._popup_text = ""
         self._popup_until = 0.0
+        # The dashboard is a preview, not the control loop. Rendering three
+        # 640x360 tiles via surfarray + smoothscale cost ~55 ms per call and
+        # dragged the 30 Hz collection loop down to ~14 Hz (jerky arms) while
+        # starving the arms' 250 Hz threads of the GIL. Render at most this
+        # often; key events are still polled on every update() call.
+        self.render_hz = 10.0
+        self._last_render = 0.0
         self._set_color(NORMAL)
         self._saved = False
 
@@ -65,7 +74,10 @@ class KBReset:
                 self._render_dashboard(dashboard_data)
             return "discard"
         if dashboard_data is not None:
-            self._render_dashboard(dashboard_data)
+            now = time.time()
+            if now - self._last_render >= 1.0 / self.render_hz:
+                self._render_dashboard(dashboard_data)
+                self._last_render = now
         return "normal"
 
     def _get_pressed(self):
@@ -191,10 +203,12 @@ class KBReset:
         if frame_rgb.dtype != np.uint8:
             frame_rgb = np.clip(frame_rgb, 0, 255).astype(np.uint8)
 
-        # pygame.surfarray expects [width, height, channels]
-        surface = pygame.surfarray.make_surface(np.transpose(frame_rgb, (1, 0, 2)))
-        scaled = pygame.transform.smoothscale(surface, (w - 8, h - 34))
-        self._screen.blit(scaled, (x + 4, y + 30))
+        # Resize with OpenCV (fast, releases the GIL) and hand pygame a ready
+        # buffer -- no transpose copy, no smoothscale on a full-size surface.
+        tw, th = max(1, w - 8), max(1, h - 34)
+        small = cv2.resize(np.ascontiguousarray(frame_rgb), (tw, th), interpolation=cv2.INTER_AREA)
+        surface = pygame.image.frombuffer(small.tobytes(), (tw, th), "RGB")
+        self._screen.blit(surface, (x + 4, y + 30))
 
     def _draw_joint_panel(
         self,

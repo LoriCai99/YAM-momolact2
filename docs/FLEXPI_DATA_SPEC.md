@@ -63,6 +63,10 @@ Two things that were **lost** before this rewrite and are now captured:
   (`1e-4` m), D435 = 1 mm/unit (`1e-3` m)**. Without `meta.json` the wrist depth
   would be off by 10×. The converter refuses to guess.
 
+Frames come from a camera-server child process at 30 fps; the 30 Hz loop samples the
+latest set, so ~3–5 % of consecutive rows repeat a camera frame (beat between the two
+clocks). Per-frame `camera_timestamps` in the JSON make repeats detectable downstream.
+
 The recorder streams frames to disk as they arrive (a two-minute episode is
 ~8 GB of RGB+depth and must not sit in RAM). Measured on this box: 0.3 ms per
 `add_observation` at 30 Hz, zero backlog.

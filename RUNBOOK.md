@@ -152,6 +152,19 @@ sg dialout -c "python experiments/launch_yaml_collect_data.py \
     --right_config_path=configs/yam_right.yaml"
 ```
 
+**What you will see at startup, in this order:** camera pre-flight table → `Starting
+camera server: …` (a child process that owns the RealSense devices; its log path is
+printed) → the two arms energise → the two leaders → `Camera client connected` →
+three `camera … depth_scale=…` lines → move to home → `Start 🚀🚀🚀`. The colour pad
+is grey until `Start`; that is normal.
+
+Why the cameras run in a child process: `rs.align` holds Python's GIL 10–20 ms per
+frame. In the same process as the arms' 250 Hz control loops that jittered every
+torque update (jerky arms) and, with the dashboard, tripped the motors' 400 ms
+watchdog. Measured after the change: loop 29.4 Hz, arms' GIL wait p95 2.8 ms. If a
+camera server is already running on the configured endpoint (e.g. one you started
+for eval) the launcher reuses it and does not hardware-reset the cameras.
+
 **Debug first, save nothing:** add `--dry_run` to the command above. Everything runs
 exactly as in a real session but episodes go to a temp directory that is deleted on
 exit, the real data directory is never touched or prompted about, and no
@@ -260,6 +273,9 @@ consumes. `lerobot.auto_convert` stays false.
 | Permission denied on `/dev/ttyUSB*` | `dialout` not active in this shell | `sg dialout -c "..."`, or log out and back in |
 | Both arms go limp right after launch; log shows `fail to communicate with the motor 1` / `loss communication` | Arms constructed while cameras + leaders already load the process (GIL stall > 400 ms watchdog) | Fixed in the launcher (arms built first). If it recurs, check nothing else heavy runs in-process before the robots |
 | Session dies with `loss communication` | `enable_auto_recovery` defaults to False (fail-fast) | Restart. Already-saved episodes are intact |
+| `camera server exited with code …` / `did not answer within 60s` | The child camera server failed to start (cameras busy, USB, bad config) | Read the log path printed at startup; `python scripts/check_cameras.py`; `pkill -f camera_server` if a stale one holds the devices |
+| `camera stream stale` / `no frames received` mid-episode | The camera server stopped publishing (USB drop) | Check its log; the episode is unfinalised (not saved) by design |
+| Arms jerky during collection | Loop below 30 Hz or GIL contention in the arms' process | Confirm `collection.camera_mode: subprocess` and that the dashboard is not modified to render every tick |
 | Right gripper stuck closed | Gripper calibration saturating (leader `FTAO9WCV`) | §6.5 |
 
 ---

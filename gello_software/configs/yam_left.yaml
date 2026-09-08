@@ -48,6 +48,16 @@ max_steps: 1000
 # Data collection configuration
 # TODO add a flag to selectively save the data or not
 collection:
+  # Where the RealSense capture runs. "subprocess" (default): the launcher spawns
+  # gello.cameras.camera_server as a child process and receives frames over ZMQ,
+  # so rs.align's 10-20 ms GIL holds never touch the arms' 250 Hz control loops.
+  # If a server is already running on rep_endpoint it is reused (and the cameras
+  # are not hardware-reset). "inprocess": legacy capture threads in the launcher.
+  camera_mode: "subprocess"
+  camera_server:
+    rep_endpoint: "tcp://127.0.0.1:5555"
+    pub_endpoint: "tcp://127.0.0.1:5556"   # multipart PUB: the loop reads the latest frames without waiting on the server
+    startup_timeout_s: 60
   max_episode_length: 10000
   act_noise_std: 0.001
   no_ops_threshold: 0.004

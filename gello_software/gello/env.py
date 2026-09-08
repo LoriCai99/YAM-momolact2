@@ -113,9 +113,18 @@ class RobotEnv:
         """
         observations: Dict[str, Any] = {}
         if self._camera_client is not None:
-            frames = self._camera_client.get_obs()
-            for name, image in frames.items():
-                observations[f"{name}_rgb"] = image
+            full = getattr(self._camera_client, "get_obs_full", None)
+            if callable(full):
+                resp = full()
+                for name, image in resp["frames"].items():
+                    observations[f"{name}_rgb"] = image
+                for name, depth in (resp.get("depth") or {}).items():
+                    observations[f"{name}_depth"] = depth if depth.ndim == 3 else depth[:, :, None]
+                for name, ts in (resp.get("timestamps") or {}).items():
+                    observations[f"{name}_timestamp"] = float(ts)
+            else:  # older client: RGB only
+                for name, image in self._camera_client.get_obs().items():
+                    observations[f"{name}_rgb"] = image
         else:
             for name, camera in self._camera_dict.items():
                 image, depth = camera.read()
@@ -138,6 +147,14 @@ class RobotEnv:
         expose a field simply omit it, so this works with dummy/saved cameras too.
         """
         meta: Dict[str, Dict[str, Any]] = {}
+        if self._camera_client is not None:
+            get_meta = getattr(self._camera_client, "get_meta", None)
+            if callable(get_meta):
+                try:
+                    return {name: dict(entry or {}) for name, entry in get_meta().items()}
+                except Exception as exc:  # pragma: no cover - server specific
+                    return {"__error__": {"errors": [f"get_meta: {exc}"]}}
+            return meta
         for name, camera in self._camera_dict.items():
             entry: Dict[str, Any] = {}
             for attr, key in (

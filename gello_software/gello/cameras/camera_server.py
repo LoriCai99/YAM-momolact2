@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import json
 import pickle
 import signal
 import sys
@@ -40,6 +41,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 import zmq
 from omegaconf import OmegaConf
 
@@ -65,8 +67,12 @@ class CameraServer:
         pub_endpoint: Optional[str] = None,
         pub_period_sec: float = DEFAULT_PUB_PERIOD_SEC,
         heartbeat_sec: float = DEFAULT_HEARTBEAT_SEC,
+        pub_format: str = "pickle",
     ) -> None:
         self.cameras = cameras
+        # "pickle": legacy PUB payload (cv2 viewer / CameraSubscriber). "multipart":
+        # zero-copy JSON header + raw buffers incl. depth (CameraStreamClient).
+        self.pub_format = pub_format
         self.rep_endpoint = rep_endpoint
         self.pub_endpoint = pub_endpoint
         self.pub_period_sec = float(pub_period_sec)
@@ -88,16 +94,64 @@ class CameraServer:
     # ------------------------------------------------------------------
 
     def _snapshot(self) -> Dict[str, Any]:
-        """Snapshot the latest color frame from every camera (RGB uint8)."""
+        """Snapshot the latest colour (RGB uint8) AND depth (uint16, native units) frames.
+
+        Depth is aligned to colour by the driver (``rs.align`` runs in THIS process,
+        which is the whole point: it holds the GIL ~10-20 ms per frame and must not
+        share a process with the arms' 250 Hz control loops). ``frames`` keeps its
+        original meaning for older clients; ``depth`` is additive.
+        """
         frames: Dict[str, Any] = {}
+        depth: Dict[str, Any] = {}
         timestamps: Dict[str, float] = {}
         for name, cam in self.cameras.items():
-            image, _depth = cam.read()
+            image, d = cam.read()
             frames[name] = image
+            if d is not None:
+                depth[name] = d[:, :, 0] if getattr(d, "ndim", 2) == 3 else d
             # Surface the capture timestamp so the client can detect staleness.
-            ts = getattr(cam, "_latest_frame_timestamp", None) or 0.0
-            timestamps[name] = float(ts)
-        return {"ok": True, "frames": frames, "timestamps": timestamps}
+            ts = getattr(cam, "last_frame_timestamp", None)
+            if ts is None:
+                ts = getattr(cam, "_latest_frame_timestamp", None)
+            timestamps[name] = float(ts or 0.0)
+        return {"ok": True, "frames": frames, "depth": depth, "timestamps": timestamps}
+
+    def _snapshot_multipart(self) -> list:
+        """``obs2`` payload: a JSON header frame followed by one raw buffer per array.
+
+        Zero-copy on both ends (``send_multipart(copy=False)`` here,
+        ``np.frombuffer`` on the client) -- pickle copied every 3.5 MB observation
+        twice and cost the collection loop ~20 ms per tick.
+        """
+        snap = self._snapshot()
+        header: Dict[str, Any] = {"ok": True, "v": 2, "cams": [], "timestamps": snap["timestamps"]}
+        parts: list = []
+        for name, rgb in snap["frames"].items():
+            rgb = np.ascontiguousarray(rgb)
+            entry: Dict[str, Any] = {"name": name, "rgb": {"shape": list(rgb.shape), "dtype": str(rgb.dtype)}}
+            parts.append(rgb)
+            d = snap["depth"].get(name)
+            if d is not None:
+                d = np.ascontiguousarray(d)
+                entry["depth"] = {"shape": list(d.shape), "dtype": str(d.dtype)}
+                parts.append(d)
+            header["cams"].append(entry)
+        return [json.dumps(header).encode("utf-8")] + parts
+
+    def _meta(self) -> Dict[str, Any]:
+        """Static per-camera metadata: serial, colour intrinsics, depth scale."""
+        meta: Dict[str, Any] = {}
+        for name, cam in self.cameras.items():
+            entry: Dict[str, Any] = {"device_id": getattr(cam, "device_id", None)}
+            for attr, key in (("get_intrinsics", "intrinsics"), ("get_depth_scale", "depth_scale_m_per_unit")):
+                fn = getattr(cam, attr, None)
+                try:
+                    entry[key] = fn() if callable(fn) else None
+                except Exception as exc:  # noqa: BLE001 - report, don't die
+                    entry[key] = None
+                    entry.setdefault("errors", []).append(f"{attr}: {exc}")
+            meta[name] = entry
+        return {"ok": True, "meta": meta}
 
     # ------------------------------------------------------------------
     # Request handling
@@ -114,8 +168,15 @@ class CameraServer:
             return
 
         try:
+            if cmd == "obs2":
+                self._rep.send_multipart(self._snapshot_multipart(), copy=False)
+                self._req_total += 1
+                self._req_window += 1
+                return
             if cmd == "obs":
                 resp = self._snapshot()
+            elif cmd == "meta":
+                resp = self._meta()
             elif cmd == "ping":
                 resp = {"ok": True, "pong": True}
             else:
@@ -124,7 +185,7 @@ class CameraServer:
             logger.exception("Request failed (cmd=%r)", cmd)
             resp = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
-        self._rep.send(pickle.dumps(resp), copy=False)
+        self._rep.send(pickle.dumps(resp, protocol=pickle.HIGHEST_PROTOCOL), copy=False)
         self._req_total += 1
         self._req_window += 1
 
@@ -139,8 +200,11 @@ class CameraServer:
                 continue
             next_tick = now + self.pub_period_sec
             try:
-                resp = self._snapshot()
-                self._pub.send(pickle.dumps(resp), copy=False)
+                if self.pub_format == "multipart":
+                    self._pub.send_multipart(self._snapshot_multipart(), copy=False)
+                else:
+                    resp = self._snapshot()
+                    self._pub.send(pickle.dumps(resp, protocol=pickle.HIGHEST_PROTOCOL), copy=False)
             except Exception as exc:  # noqa: BLE001 — pub is best-effort
                 logger.warning("PUB tick failed: %s", exc)
 
@@ -203,7 +267,11 @@ class CameraServer:
                     pass
         for cam in self.cameras.values():
             try:
-                cam._stop_event.set()
+                close = getattr(cam, "close", None)
+                if callable(close):
+                    close()
+                else:
+                    cam._stop_event.set()
             except Exception:  # noqa: BLE001 — best-effort cleanup
                 pass
         logger.info("Camera server stopped.")
@@ -240,6 +308,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="ZMQ PUB endpoint. Pass empty string to disable the PUB stream.",
     )
     parser.add_argument("--pub-period-sec", type=float, default=DEFAULT_PUB_PERIOD_SEC)
+    parser.add_argument("--pub-format", choices=("pickle", "multipart"), default="pickle",
+                        help="PUB payload: pickle (legacy viewer) or multipart zero-copy incl. depth.")
     parser.add_argument("--heartbeat-sec", type=float, default=DEFAULT_HEARTBEAT_SEC)
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
@@ -256,6 +326,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         pub_endpoint=(args.pub_endpoint or None),
         pub_period_sec=args.pub_period_sec,
         heartbeat_sec=args.heartbeat_sec,
+        pub_format=args.pub_format,
     )
 
     def _handle(signum, _frame):

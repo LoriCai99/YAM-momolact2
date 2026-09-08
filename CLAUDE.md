@@ -111,6 +111,22 @@ eval launcher uses for the policy load. Keep it that way in any new launcher. `Y
 also widens i2rt's 5×10 ms power-on handshake (misses replies under the same contention) and
 raises if its chain has died, so frozen joints are never recorded as data.
 
+## Cameras run out of process during collection (2026-09-08)
+
+Measured on this box: the RealSense capture threads hold the GIL 10–20 ms per frame —
+specifically `rs.align.process` (align off → GIL wait p95 0.15 ms; on → 9.5 ms). The D435
+*must* be aligned (its depth is a different sensor: fx 320 vs 462, 15 mm offset), so the cost
+cannot simply be dropped. In the arms' process it jitters i2rt's 250 Hz loops (10 ms CAN
+poll timeouts) and, stacked with the pygame dashboard (was 55 ms/tick → 14 Hz loop), trips
+the motors' 400 ms watchdog. `launch_yaml_collect_data.py` therefore spawns
+`gello.cameras.camera_server` as a child (`collection.camera_mode: subprocess`) and reads
+frames through `CameraStreamClient` — a receiver thread on a zero-copy multipart PUB stream
+(`--pub-format multipart`), so the loop never waits on the server. REQ/REP (`obs2`) is the
+fallback. Result: 29.4 Hz, arms' GIL wait p95 2.8 ms, both arms alive with the dashboard.
+The dashboard renders at 10 Hz with cv2-resized tiles (~7 ms). Do not add GIL-heavy work
+(image encode/resize in pure Python, model loads, MuJoCo) to the collection process while
+the arms are live; put it in a child process or before the robots are constructed.
+
 ## flex-pi data pipeline (added 2026-09-08)
 
 The team finetunes **flex-pi** (`flex-pi/soft_bag_zipping` is literally this task). Read

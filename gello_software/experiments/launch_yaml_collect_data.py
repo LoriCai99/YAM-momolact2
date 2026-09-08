@@ -6,6 +6,7 @@ import signal
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,7 @@ from gello.utils.launch_utils import instantiate_from_dict, move_to_start_positi
 from gello.dynamixel.driver import DynamixelDriver
 import numpy as np
 
+from gello.cameras.camera_client import CameraClient, CameraClientError, CameraStreamClient
 from gello.cameras.realsense_camera import (
     STREAM_FPS,
     STREAM_HEIGHT,
@@ -40,6 +42,8 @@ cleanup_in_progress = False
 
 _env = None
 _bimanual = False
+_camera_client = None
+_camera_server_proc = None
 _left_cfg = None
 _right_cfg = None
 _agent = None
@@ -64,6 +68,78 @@ def _call_cleanup_methods(resource, resource_name: str, methods: list[str]) -> N
 
 
 CAMERA_ROLES = ["left_camera", "front_camera", "right_camera"]
+
+DEFAULT_CAMERA_REP = "tcp://127.0.0.1:5555"
+DEFAULT_CAMERA_PUB = "tcp://127.0.0.1:5556"
+
+
+def _ping_camera_server(endpoint: str, timeout_ms: int = 300) -> bool:
+    """True if a camera server already answers on ``endpoint``."""
+    client = None
+    try:
+        client = CameraClient(endpoint, request_timeout_ms=timeout_ms, max_frame_age_sec=None)
+        return bool(client.ping())
+    except Exception:  # noqa: BLE001 - nothing there, or not ours
+        return False
+    finally:
+        if client is not None:
+            client.close()
+
+
+def _start_camera_server(config_path: str, rep: str, pub: str, log_path: str) -> subprocess.Popen:
+    """Spawn gello.cameras.camera_server as a child process.
+
+    Why a separate process: the RealSense driver aligns depth to colour with
+    ``rs.align``, which holds the GIL ~10-20 ms per frame. In the same process
+    as the arms' 250 Hz control threads that jitters every torque update and,
+    combined with the dashboard, tripped the motors' 400 ms watchdog. Out of
+    process, the collection loop sees idle-level GIL contention.
+    """
+    log = open(log_path, "ab", buffering=0)
+    cmd = [sys.executable, "-m", "gello.cameras.camera_server", "--config", os.path.abspath(config_path),
+           "--rep-endpoint", rep, "--pub-endpoint", pub, "--pub-format", "multipart"]
+    print(f"Starting camera server: {' '.join(cmd)}\n  (log: {log_path})")
+    return subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+
+
+def _connect_camera_client(rep: str, timeout_s: float, proc: Optional[subprocess.Popen], log_path: Optional[str],
+                           pub: str = ""):
+    """Wait until the server answers ping, then return a client for the control loop.
+
+    With a PUB endpoint, returns a CameraStreamClient (latest frames kept by a
+    receiver thread; the loop never waits on the server). Otherwise a plain
+    REQ/REP CameraClient.
+    """
+    deadline = time.time() + timeout_s
+    while True:
+        if proc is not None and proc.poll() is not None:
+            tail = ""
+            if log_path and os.path.exists(log_path):
+                with open(log_path, "rb") as f:
+                    tail = f.read()[-2000:].decode(errors="replace")
+            raise RuntimeError(f"camera server exited with code {proc.returncode} before becoming ready. Log tail:\n{tail}")
+        if _ping_camera_server(rep, timeout_ms=500):
+            break
+        if time.time() > deadline:
+            raise RuntimeError(f"camera server at {rep} did not answer within {timeout_s:.0f}s (log: {log_path})")
+        time.sleep(0.5)
+    if pub:
+        return CameraStreamClient(rep, pub, request_timeout_ms=500, max_frame_age_sec=0.5)
+    return CameraClient(rep, request_timeout_ms=500, max_frame_age_sec=0.5)
+
+
+def _stop_camera_server(proc: Optional[subprocess.Popen]) -> None:
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=8)
+    except Exception:  # noqa: BLE001
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+
 
 
 def _preflight_cameras(camera_cfg: dict) -> None:
@@ -166,6 +242,11 @@ def cleanup():
     if isinstance(_cameras, dict):
         for camera_name, camera in _cameras.items():
             _close_realsense_camera(camera, camera_name)
+    if _camera_client is not None:
+        _call_cleanup_methods(_camera_client, "camera_client", ["close"])
+    if _camera_server_proc is not None:
+        print("Stopping camera server subprocess...")
+        _stop_camera_server(_camera_server_proc)
 
     if _kb_interface is not None:
         _call_cleanup_methods(_kb_interface, "kb_interface", ["close", "stop", "shutdown"])
@@ -390,6 +471,7 @@ def run_post_collection_pipeline(cfg: dict) -> None:
 def main():
     global _env, _bimanual, _left_cfg, _right_cfg
     global _agent, _robot, _robot_client, _cameras, _data_saver, _kb_interface
+    global _camera_client, _camera_server_proc
     # Register cleanup handlers
     # If terminated without cleanup, can leave ZMQ sockets bound causing "address in use" errors or resource leaks
 
@@ -398,11 +480,6 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     args = tyro.cli(Args)
-
-    # left, right front camera (the device id order is based on the plugged in order on the adapter)
-    ids = get_device_ids()
-    print(f"Found {len(ids)} camera devices")
-    print(ids)
 
     bimanual = args.right_config_path is not None
 
@@ -422,9 +499,30 @@ def main():
         print("         Real data dir is untouched; no post-collection pipeline.")
         print("=" * 72)
 
+    # Camera mode. "subprocess" (default): a camera server child process owns the
+    # RealSense devices and the arms' process only receives frames over ZMQ.
+    # "inprocess": the old path (RealSense capture threads in this process).
+    coll_cfg = left_cfg.get("collection") or {}
+    camera_mode = str(coll_cfg.get("camera_mode", "subprocess")).lower()
+    cs_cfg = coll_cfg.get("camera_server") or {}
+    cam_rep = cs_cfg.get("rep_endpoint", DEFAULT_CAMERA_REP)
+    cam_pub = cs_cfg.get("pub_endpoint", DEFAULT_CAMERA_PUB) or ""  # PUB (multipart) feeds the loop; empty = REQ/REP only
+    existing_server = camera_mode == "subprocess" and _ping_camera_server(cam_rep)
+    if existing_server:
+        print(f"Camera server already running at {cam_rep}; using it (not resetting cameras).")
+    else:
+        ids = get_device_ids()  # hardware_reset() every RealSense before anything opens them
+        print(f"Found {len(ids)} camera devices")
+        print(ids)
+
     # Fail fast on cameras BEFORE touching the GELLO ports, prompting about the
     # output dir, or energizing anything.
     _preflight_cameras(left_cfg["sensors"]["cameras"])
+    _cam_log = None
+    if camera_mode == "subprocess" and not existing_server:
+        # Spawn now so its ~5 s of pipeline start-up overlaps the arm construction.
+        _cam_log = os.path.join(tempfile.gettempdir(), f"yam_camera_server_{os.getpid()}.log")
+        _camera_server_proc = _start_camera_server(args.left_config_path, cam_rep, cam_pub, _cam_log)
     left_cfg = update_offsets(left_cfg)
     if bimanual:
         right_cfg = OmegaConf.to_container(
@@ -549,13 +647,18 @@ def main():
         agent = instantiate_from_dict(left_cfg["agent"])
 
     camera_cfg = left_cfg["sensors"]["cameras"]
-    cameras = _open_cameras(camera_cfg)
+    if camera_mode == "subprocess":
+        _camera_client = _connect_camera_client(cam_rep, float(cs_cfg.get("startup_timeout_s", 60)), _camera_server_proc, _cam_log, pub=cam_pub)
+        cameras = None
+        print(f"Camera client connected to {cam_rep}")
+    else:
+        cameras = _open_cameras(camera_cfg)
     # Register for cleanup NOW: if robot construction below raises (e.g. a motor
     # not answering), the atexit handler must still stop the capture threads, or
     # librealsense aborts/segfaults at interpreter exit.
     _cameras = cameras
 
-    env = RobotEnv(robot_client, control_rate_hz=cfg.get("hz", 30), camera_dict=cameras)
+    env = RobotEnv(robot_client, control_rate_hz=cfg.get("hz", 30), camera_dict=cameras, camera_client=_camera_client)
     # Intrinsics + depth scale per camera go into every episode's meta.json.
     data_saver.set_camera_meta(env.get_camera_meta())
     for _cam, _m in env.get_camera_meta().items():
@@ -620,6 +723,8 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except SystemExit:
+        raise  # --help / argparse exits are not crashes
     except BaseException as exc:  # noqa: BLE001 -- includes KeyboardInterrupt
         # The in-process ZMQ hardware server runs on a NON-daemon thread, so an
         # unhandled exception in main() would print its traceback and then hang
