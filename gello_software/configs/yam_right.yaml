@@ -13,10 +13,11 @@ agent:
     joint_ids: [8, 9, 10, 11, 12, 13]
     joint_offsets: [3.14159, 3.14159, 3.14159, 3.14159, 3.14159, 3.14159]
     joint_signs: [1.0, -1.0, 1.0, -1.0, 1.0, 1.0]
-    # NOTE: this leader's trigger rests at ~113 deg, past the 108.37 closed bound
-    # below, so the gripper command saturates (right gripper pinned closed).
-    # Recalibrate with:  python scripts/calibrate_gripper.py --side right
-    gripper_config: [14, 55.869140625, 108.369140625]
+    # Calibrated 2026-09-08 with scripts/calibrate_gripper.py (measured travel
+    # ~54.7..115.1 deg, 5% trimmed). Order is [id, squeezed_deg, released_deg]:
+    # squeezed -> 0 (i2rt closed), released -> 1 (i2rt open). The trigger rests
+    # at ~113.5 deg, just past the released bound, so hands-off = fully open.
+    gripper_config: [14, 57.5288, 112.1880]
   start_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 hz: 30
 max_steps: 1000

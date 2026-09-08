@@ -40,7 +40,12 @@ agent:
     joint_ids: [1, 2, 3, 4, 5, 6]
     joint_offsets: [3.14159, 3.14159, 3.14159, 3.14159, 3.14159, 3.14159]
     joint_signs: [1.0, -1.0, -1.0, -1.0, 1.0, 1.0]
-    gripper_config: [7, 55.869140625, 108.369140625]
+    # Calibrated 2026-09-08 with scripts/calibrate_gripper.py: measured travel
+    # ~55.6..103.6 deg. Released bound set at the trigger's REST angle (97.3, not
+    # the 101.3 the script suggested): this trigger's rest drifts 97..105 deg
+    # between sessions, and hands-off must always mean fully open (1.0).
+    # Order is [id, squeezed_deg, released_deg].
+    gripper_config: [7, 57.8716, 97.3]
   start_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 hz: 30
 max_steps: 1000
