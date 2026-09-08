@@ -68,7 +68,15 @@ class CameraServer:
         pub_period_sec: float = DEFAULT_PUB_PERIOD_SEC,
         heartbeat_sec: float = DEFAULT_HEARTBEAT_SEC,
         pub_format: str = "pickle",
+        pub_on_new_frame: bool = False,
+        pub_fallback_sec: float = 0.05,
     ) -> None:
+        # Event-driven publishing: send once every camera has captured a new frame
+        # (phase-locked to the cameras, ~camera rate), or after pub_fallback_sec if
+        # one camera stalls. Publishing on a faster fixed timer starves the capture
+        # threads (rs.align holds the GIL) and INCREASES duplicated frames.
+        self.pub_on_new_frame = pub_on_new_frame
+        self.pub_fallback_sec = float(pub_fallback_sec)
         self.cameras = cameras
         # "pickle": legacy PUB payload (cv2 viewer / CameraSubscriber). "multipart":
         # zero-copy JSON header + raw buffers incl. depth (CameraStreamClient).
@@ -189,16 +197,33 @@ class CameraServer:
         self._req_total += 1
         self._req_window += 1
 
+    def _all_cameras_advanced(self, last_counts: Dict[str, int]) -> bool:
+        for name, cam in self.cameras.items():
+            if getattr(cam, "frame_count", None) is None:
+                return True  # camera does not expose a counter: fall back to timer behaviour
+            if cam.frame_count <= last_counts.get(name, -1):
+                return False
+        return True
+
     def _pub_loop(self) -> None:
         assert self._pub is not None
         next_tick = time.time()
+        last_counts: Dict[str, int] = {}
+        last_pub = 0.0
         while not self._stop_event.is_set():
             now = time.time()
-            if now < next_tick:
-                # Tiny sleep granularity so shutdown is snappy.
-                time.sleep(min(0.01, next_tick - now))
-                continue
-            next_tick = now + self.pub_period_sec
+            if self.pub_on_new_frame:
+                if not (self._all_cameras_advanced(last_counts) or now - last_pub >= self.pub_fallback_sec):
+                    time.sleep(0.0005)
+                    continue
+                last_counts = {n: getattr(c, "frame_count", 0) or 0 for n, c in self.cameras.items()}
+                last_pub = now
+            else:
+                if now < next_tick:
+                    # Tiny sleep granularity so shutdown is snappy.
+                    time.sleep(min(0.01, next_tick - now))
+                    continue
+                next_tick = now + self.pub_period_sec
             try:
                 if self.pub_format == "multipart":
                     self._pub.send_multipart(self._snapshot_multipart(), copy=False)
@@ -308,6 +333,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="ZMQ PUB endpoint. Pass empty string to disable the PUB stream.",
     )
     parser.add_argument("--pub-period-sec", type=float, default=DEFAULT_PUB_PERIOD_SEC)
+    parser.add_argument("--pub-on-new-frame", action="store_true",
+                        help="Publish once per new frame set (phase-locked to the cameras) instead of on a timer.")
     parser.add_argument("--pub-format", choices=("pickle", "multipart"), default="pickle",
                         help="PUB payload: pickle (legacy viewer) or multipart zero-copy incl. depth.")
     parser.add_argument("--heartbeat-sec", type=float, default=DEFAULT_HEARTBEAT_SEC)
@@ -329,6 +356,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         pub_period_sec=args.pub_period_sec,
         heartbeat_sec=args.heartbeat_sec,
         pub_format=args.pub_format,
+        pub_on_new_frame=args.pub_on_new_frame,
     )
     if args.exit_with_parent:
         import os

@@ -88,6 +88,7 @@ class RealSenseCamera(CameraDriver):
         self._latest_color_image = None
         self._latest_depth_image = None
         self._latest_frame_timestamp = None
+        self._frame_count = 0  # incremented per captured frame; lets a publisher phase-lock to the camera
         self._last_capture_error = None
         self._frame_ready = threading.Event()
         self._stop_event = threading.Event()
@@ -132,6 +133,7 @@ class RealSenseCamera(CameraDriver):
                     self._latest_color_image = color_image
                     self._latest_depth_image = depth_image
                     self._latest_frame_timestamp = timestamp
+                    self._frame_count += 1
                     self._last_capture_error = None
                     self._frame_ready.set()
 
@@ -223,6 +225,11 @@ class RealSenseCamera(CameraDriver):
     @property
     def device_id(self) -> Optional[str]:
         return self._device_id
+
+    @property
+    def frame_count(self) -> int:
+        """Number of frames captured so far (monotonic)."""
+        return self._frame_count
 
     @property
     def last_frame_timestamp(self) -> Optional[float]:

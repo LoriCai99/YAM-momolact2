@@ -122,7 +122,10 @@ the motors' 400 ms watchdog. `launch_yaml_collect_data.py` therefore spawns
 `gello.cameras.camera_server` as a child (`collection.camera_mode: subprocess`) and reads
 frames through `CameraStreamClient` — a receiver thread on a zero-copy multipart PUB stream
 (`--pub-format multipart`), so the loop never waits on the server. REQ/REP (`obs2`) is the
-fallback. Result: 29.4 Hz, arms' GIL wait p95 2.8 ms, both arms alive with the dashboard.
+fallback. Result: 29.4 Hz, arms' GIL wait p95 2.8 ms, both arms alive with the dashboard. `RobotEnv.Rate`
+now schedules on an absolute timeline (exact 30.0 Hz; the old version drifted to 29.2), and the
+server publishes event-driven (`--pub-on-new-frame`): 0.5 % duplicated frames. Do **not** publish
+on a faster timer — 60 Hz starved the capture threads and raised duplicates to 23 % on the D435.
 The dashboard renders at 10 Hz with cv2-resized tiles (~7 ms). Do not add GIL-heavy work
 (image encode/resize in pure Python, model loads, MuJoCo) to the collection process while
 the arms are live; put it in a child process or before the robots are constructed.

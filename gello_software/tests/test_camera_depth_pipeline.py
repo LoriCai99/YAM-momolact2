@@ -213,3 +213,18 @@ def test_stream_client_falls_back_to_req_when_pub_is_pickle():
         c.close()
         server.shutdown()
         t.join(timeout=2)
+
+
+def test_event_driven_pub_waits_for_all_cameras():
+    """With pub_on_new_frame, the PUB loop publishes only when every camera advanced (or on fallback)."""
+    cams = _cams()
+    for c in cams.values():
+        c.frame_count = 0
+    s = CameraServer(cams, rep_endpoint="inproc://z", pub_on_new_frame=True, pub_fallback_sec=10.0)
+    assert s._all_cameras_advanced({}) is True          # nothing published yet -> publish
+    last = {n: 0 for n in cams}
+    assert s._all_cameras_advanced(last) is False       # no camera advanced past 0
+    cams["left_camera"].frame_count = 1
+    assert s._all_cameras_advanced(last) is False       # only one camera advanced
+    cams["front_camera"].frame_count = 1
+    assert s._all_cameras_advanced(last) is True        # all advanced

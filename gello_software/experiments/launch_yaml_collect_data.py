@@ -98,8 +98,9 @@ def _start_camera_server(config_path: str, rep: str, pub: str, log_path: str) ->
     log = open(log_path, "ab", buffering=0)
     cmd = [sys.executable, "-m", "gello.cameras.camera_server", "--config", os.path.abspath(config_path),
            "--rep-endpoint", rep, "--pub-endpoint", pub, "--pub-format", "multipart", "--exit-with-parent",
-           # publish at 2x the camera rate so a 30 Hz loop tick always sees the newest frame
-           "--pub-period-sec", str(1.0 / 60.0)]
+           # publish once per new frame set, phase-locked to the cameras (a faster timer
+           # starves the capture threads and increases duplicated frames)
+           "--pub-on-new-frame"]
     print(f"Starting camera server: {' '.join(cmd)}\n  (log: {log_path})")
     return subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 
