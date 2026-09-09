@@ -97,6 +97,19 @@ line on the pad and nothing in the terminal. The server's reconnects failed
 with `xioctl(VIDIOC_S_FMT) errno=5` — the camera re-enumerates but cannot
 stream; hardware, not the pad.
 
+## Left-wrist camera link drops under arm motion (2026-09-08, evening)
+
+After the left D405 was replaced (`353322270868`), the new camera still stalled
+mid-take in episodes 000048/056/086/089: frames stop first, kernel USB
+disconnect 5–6 s later, on host ports 2-8, 2-7 and 2-5 across sessions. Two
+cameras, three ports, one constant — the cable along the LEFT arm and its USB-C
+plug at the camera; stalls come 25–45 s in, with the arm extended. Physical fix
+(re-seat / slack / strap the cable like the right arm's), then verify with
+`scripts/test_camera_drop.py --monitor --seconds 120` while moving the arm.
+`RUNBOOK.md` blocker ② has the details. Kernel USB *descriptor* serials differ
+from librealsense serials (e.g. `235123073950` vs `335122270697`) — do not match
+cameras to ports by descriptor serial.
+
 ## Diagnostic scripts added 2026-09-02
 
 Written while bringing this workstation up; all live in `gello_software/scripts/`.

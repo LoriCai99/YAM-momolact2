@@ -29,11 +29,16 @@ from gello.cameras.camera_client import CameraClient, CameraStreamClient
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "configs/yam_left.yaml"))
-    ap.add_argument("--reset-serial", required=True)
+    ap.add_argument("--reset-serial", help="camera to hardware-reset at t=5 s (drop-recovery test)")
+    ap.add_argument("--monitor", action="store_true",
+                    help="no reset: just watch the stream and print every stall/recovery with a timestamp "
+                         "(move the arm by hand to find a cable/connector fault). PASS = no stall at all.")
     ap.add_argument("--rep", default="tcp://127.0.0.1:5555")
     ap.add_argument("--pub", default="tcp://127.0.0.1:5556")
     ap.add_argument("--seconds", type=float, default=32.0)
     a = ap.parse_args()
+    if not a.monitor and not a.reset_serial:
+        ap.error("--reset-serial <serial> or --monitor is required")
 
     cmd = [sys.executable, "-m", "gello.cameras.camera_server", "--config", os.path.abspath(a.config),
            "--rep-endpoint", a.rep, "--pub-endpoint", a.pub, "--pub-format", "multipart", "--pub-on-new-frame"]
@@ -68,6 +73,15 @@ def main() -> int:
                 if state["last_rx"] is not None and rx != state["last_rx"]:
                     gaps.append(rx - state["last_rx"])
                 state["last_rx"] = rx
+                now_stale = set(o["stale"])
+                if now_stale != state.get("cur_stale", set()):
+                    ts = time.strftime("%H:%M:%S")
+                    for cam in sorted(now_stale - state.get("cur_stale", set())):
+                        print(f"  [{ts} t={time.time() - t0:5.1f}s] STALL   {cam}", flush=True)
+                        state["events"] = state.get("events", 0) + 1
+                    for cam in sorted(state.get("cur_stale", set()) - now_stale):
+                        print(f"  [{ts} t={time.time() - t0:5.1f}s] fresh   {cam}", flush=True)
+                    state["cur_stale"] = now_stale
                 if o["stale"]:
                     stale_seen.update(o["stale"])
                     if state["first_stale"] is None:
@@ -78,17 +92,24 @@ def main() -> int:
 
         th = threading.Thread(target=consume, daemon=True)
         th.start()
-        time.sleep(5)
-        print(f"t=5s: hardware_reset() of {a.reset_serial}")
-        subprocess.Popen([sys.executable, "-c",
-                          "import pyrealsense2 as rs\nfor d in rs.context().query_devices():\n"
-                          f"    if d.get_info(rs.camera_info.serial_number)=='{a.reset_serial}': d.hardware_reset()"])
+        if a.monitor:
+            print(f"MONITOR for {a.seconds:.0f}s: move the arm through the whole task now; every stall is printed as it happens.")
+        else:
+            time.sleep(5)
+            print(f"t=5s: hardware_reset() of {a.reset_serial}")
+            subprocess.Popen([sys.executable, "-c",
+                              "import pyrealsense2 as rs\nfor d in rs.context().query_devices():\n"
+                              f"    if d.get_info(rs.camera_info.serial_number)=='{a.reset_serial}': d.hardware_reset()"])
         th.join(timeout=a.seconds + 10)
         g = np.array(gaps) * 1e3 if gaps else np.array([0.0])
         print(f"frame-set gaps: p50 {np.percentile(g, 50):.0f} ms  p99 {np.percentile(g, 99):.0f}  MAX {g.max():.0f} ms  (loop aborts at 3000)")
         print(f"client error: {state['err']}")
         print(f"stale seen: {sorted(stale_seen)} | first stale {state['first_stale'] and round(state['first_stale'], 1)}s | all fresh again {state['recovered'] and round(state['recovered'], 1)}s")
-        ok = state["err"] is None and state["recovered"] is not None and g.max() < 1000
+        if a.monitor:
+            ok = state["err"] is None and not stale_seen and g.max() < 1000
+            print(f"stall events: {state.get('events', 0)}")
+        else:
+            ok = state["err"] is None and state["recovered"] is not None and g.max() < 1000
         print("PASS" if ok else "FAIL")
         c.close()
         return 0 if ok else 1

@@ -24,7 +24,7 @@ this file as machine-specific and re-derive them with the diagnostics in §6.
 | Left GELLO | `FTAO9WPU` → Dynamixel IDs `1–7`, 57600 baud |
 | Right GELLO | `FTAO9WCV` → Dynamixel IDs `8–14`, 57600 baud |
 | Front/top camera | D435 `922612071156` |
-| Left camera | D405 `353322270868` (replaced 2026-09-08) |
+| Left camera | D405 `353322270868` (replaced 2026-09-08; its cable is blocker ②) |
 | Right camera | D405 `218622275075` |
 | Data output | `/home/evan/yam_data/<task_directory>/` |
 
@@ -59,16 +59,26 @@ for d in rs.context().query_devices():
 
 Teleop is unaffected — it never opens cameras.
 
-**② RESOLVED 2026-09-08 — the left D405 was replaced.** The original unit
-(`335122270697`) disconnected from USB 60+ times, enumerated without streaming
-(`xioctl VIDIOC_S_FMT errno=5`), and the fault followed the camera through a
-cable and port swap. Eighteen episodes (000008–000044, see `inspect_episodes.py
---summary`) have a frozen left-wrist view and must not be used. The replacement
-D405 `353322270868` is in `configs/yam_left.yaml`; `check_cameras.py` reports
-READY. If a camera is ever swapped again: put its serial under `left_camera`,
-run `python scripts/check_cameras.py` (must be READY) and
-`python scripts/test_camera_drop.py --reset-serial <serial>` (must PASS), and
-check its aim with `python scripts/view_cameras.py`.
+**② The LEFT WRIST camera link drops under arm motion — cable / connector,
+not the camera.** History: the original left D405 (`335122270697`) dropped off
+USB repeatedly and finally could not stream at all; it was replaced on
+2026-09-08 by D405 `353322270868`. The *new* camera then stalled mid-take in
+episodes 000048, 000056, 000086, 000089: each time the frames stopped first and
+the kernel logged a USB disconnect 5–6 s later, on host port 2-8, then 2-7, then
+2-5 (the camera was re-plugged between sessions). Three host ports, two
+cameras, one constant: the cable running along the LEFT arm and its USB-C plug
+at the camera. The stalls always come 25–45 s into a take, when the arm is
+extended. The right wrist camera, same model, has never dropped.
+
+Fix (physical): re-seat the USB-C plug at the camera; give the cable slack at
+every joint so the plug never carries load; strap it to the arm the way the
+right arm's cable is routed; if the plug is loose in the socket, use a
+different (locking or right-angle) cable. The old camera's socket was probably
+worn out by the same strain. Then verify while moving the arm:
+`python scripts/test_camera_drop.py --monitor --seconds 120` (move the left arm
+through the whole task by hand; it must report no stall). The collection loop
+blocks Enter while the camera is dead and excludes any take with a stall, so
+bad data cannot be saved, but every stall costs a take.
 
 **③ The RIGHT GELLO trigger does not spring back.** Calibration is done (both
 triggers measured 2026-09-08), but the right trigger stays wherever it is left, so
