@@ -285,3 +285,16 @@ def test_stream_client_only_aborts_when_server_goes_silent(running_pub_server):
             c.get_obs_full()
     finally:
         c.close()
+
+
+def test_stalled_camera_does_not_gate_publishing():
+    cams = _cams()
+    for c in cams.values():
+        c.frame_count = 5
+    s = CameraServer(cams, rep_endpoint="inproc://g", pub_on_new_frame=True)
+    last = {n: 5 for n in cams}
+    cams["front_camera"].frame_count = 6                     # front advanced
+    cams["left_camera"].last_frame_timestamp = time.time() - 5  # left silent for 5 s
+    assert s._all_cameras_advanced(last) is True             # publish at the live camera's rate
+    cams["left_camera"].last_frame_timestamp = time.time()   # left alive again but not advanced
+    assert s._all_cameras_advanced(last) is False            # now it gates as before

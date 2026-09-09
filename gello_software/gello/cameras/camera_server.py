@@ -216,13 +216,29 @@ class CameraServer:
         self._req_total += 1
         self._req_window += 1
 
+    STALE_GATE_SEC = 0.3  # a camera silent this long no longer gates publishing
+
     def _all_cameras_advanced(self, last_counts: Dict[str, int]) -> bool:
+        """True when every LIVE camera has a new frame since the last publish.
+
+        A camera that has produced nothing for STALE_GATE_SEC is excluded from the
+        gate: otherwise one dead camera held publishing to the 50 ms fallback timer
+        (20 Hz) and the healthy cameras were recorded with ~35% duplicated frames
+        (2026-09-08 episodes 8/10/11/17). The dead camera is still served from its
+        last frame and flagged stale.
+        """
+        now = time.time()
+        gated = 0
         for name, cam in self.cameras.items():
             if getattr(cam, "frame_count", None) is None:
                 return True  # camera does not expose a counter: fall back to timer behaviour
+            ts = getattr(cam, "last_frame_timestamp", None)
+            if ts is not None and now - ts > self.STALE_GATE_SEC:
+                continue  # stalled: do not wait for it
+            gated += 1
             if cam.frame_count <= last_counts.get(name, -1):
                 return False
-        return True
+        return gated > 0 or True
 
     def _pub_loop(self) -> None:
         assert self._pub is not None
