@@ -226,7 +226,11 @@ def encode_rgb(paths: List[str], out: str, fps: int, crf: int) -> Tuple[int, int
         s = c.add_stream("libx264", rate=fps)
         s.width, s.height, s.pix_fmt = w, h, "yuv420p"
         s.time_base = Fraction(1, fps)
-        s.options = {"crf": str(crf), "preset": "medium"}
+        # ALL-INTRA: every frame is a keyframe (GOP 1, no B-frames, no scene-cut logic), so
+        # any single frame decodes on its own -- required by flex-pi (2026-09-09).
+        s.codec_context.gop_size = 1
+        s.options = {"crf": str(crf), "preset": "medium", "g": "1", "bf": "0",
+                     "x264-params": "keyint=1:min-keyint=1:scenecut=0:bframes=0"}
         for i, p in enumerate(paths):
             bgr = cv2.imread(p, cv2.IMREAD_COLOR)
             if bgr is None or bgr.shape[:2] != (h, w):
@@ -266,6 +270,8 @@ def encode_depth(paths: List[str], out: str, fps: int, depth_scale_m_per_unit: f
         s = c.add_stream("ffv1", rate=fps)
         s.width, s.height, s.pix_fmt = w, h, "gray16le"
         s.time_base = Fraction(1, fps)
+        s.codec_context.gop_size = 1  # all-intra as well (FFV1 keyframe every frame)
+        s.options = {"g": "1"}
         for i, p in enumerate(paths):
             raw = cv2.imread(p, cv2.IMREAD_UNCHANGED)
             if raw is None or raw.dtype != np.uint16 or raw.shape != (h, w):
@@ -539,7 +545,8 @@ def convert(
             json.dump(intr_out, f, indent=2)
     with open(output_dir / "meta/conversion.json", "w") as f:  # provenance, not part of v2.1
         json.dump({"builder": BUILDER, "ee_model": ee_model, "ee_site": ee_site, "action_mode": action_mode,
-                   "rgb_crf": rgb_crf, "camera_map": camera_map, "source_data_dir": str(data_dir),
+                   "rgb_crf": rgb_crf, "rgb_all_keyframes": True, "depth_all_keyframes": True,
+                   "camera_map": camera_map, "source_data_dir": str(data_dir),
                    "converted_at": time.strftime("%Y-%m-%d %H:%M:%S"), "warnings": warnings}, f, indent=2)
 
     log(f"\nWrote {len(ep_dirs)} episodes / {total_frames} frames / {len(jobs)} videos -> {output_dir}")

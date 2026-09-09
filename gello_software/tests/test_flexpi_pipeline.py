@@ -225,3 +225,34 @@ def test_recorder_logs_stale_cameras_per_frame(tmp_path):
     rows = json.load(open(tmp_path / "raw" / "000001" / "000001.json"))
     assert rows[0]["camera_stale"] == [] and rows[3]["camera_stale"] == ["left"]
     assert json.load(open(tmp_path / "raw" / "000001" / "meta.json"))["frames_with_stale_camera"] == 2
+
+
+
+def _keyframe_ratio(path):
+    import av
+    with av.open(str(path)) as c:
+        s = c.streams.video[0]
+        pk = [p for p in c.demux(s) if p.size > 0]
+        return sum(bool(p.is_keyframe) for p in pk), len(pk)
+
+
+def test_all_frames_are_keyframes(tmp_path):
+    """flex-pi requires RGB (and depth) videos where every frame is a keyframe (GOP 1)."""
+    import numpy as np
+    import cv2
+    from flexpi_convert import encode_rgb, encode_depth
+
+    n = 12
+    rgb_paths, depth_paths = [], []
+    for i in range(n):
+        img = (np.random.rand(360, 640, 3) * 255).astype(np.uint8)
+        cv2.circle(img, (50 + 30 * i, 180), 20, (255, 255, 255), -1)
+        p = tmp_path / f"rgb_{i:03d}.jpg"; cv2.imwrite(str(p), img); rgb_paths.append(str(p))
+        d = (np.random.rand(360, 640) * 5000).astype(np.uint16)
+        q = tmp_path / f"d_{i:03d}.png"; cv2.imwrite(str(q), d); depth_paths.append(str(q))
+    encode_rgb(rgb_paths, str(tmp_path / "rgb.mp4"), 30, 20)
+    encode_depth(depth_paths, str(tmp_path / "depth.mkv"), 30, 0.001)
+    k, tot = _keyframe_ratio(tmp_path / "rgb.mp4")
+    assert tot == n and k == n, f"rgb: {k}/{tot} keyframes"
+    k, tot = _keyframe_ratio(tmp_path / "depth.mkv")
+    assert tot == n and k == n, f"depth: {k}/{tot} keyframes"
