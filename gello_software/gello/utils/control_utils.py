@@ -240,6 +240,7 @@ def run_control_loop_prior(
 
     start_time = time.time()
     last_save_time = time.time()
+    last_action = ""
 
     # implemented in env.py to allow dynamic offset during data collection
     env.set_original_offset(agent.act(env.get_obs()))
@@ -285,7 +286,7 @@ def run_control_loop_prior(
             dashboard_data = build_dashboard_data(
                 obs=obs,
                 phase="waiting_start",
-                status_text="Press Enter to start collecting",
+                status_text=("Press Enter to start (3-2-1 countdown)" + (f"   |   last: {last_action}" if last_action else "")),
                 traj_idx=num_traj,
                 total_traj=left_cfg['storage']['episodes'],
                 step_idx=0,
@@ -293,10 +294,17 @@ def run_control_loop_prior(
             )
             result = kb_interface.update(dashboard_data)
             if result == "start":
-                logger.info(f"Enter pressed, starting to collect data")
-                time.sleep(1)
+                logger.info("Enter pressed; 3-2-1 countdown before recording")
+                # Three seconds to get both hands on the leaders. The pad shows the
+                # count; the terminal too. Arms are not commanded during the count.
+                for n in (3, 2, 1):
+                    print(f"\rStarting in {n}...   ", end="", flush=True)
+                    kb_interface.banner(f"Starting in {n}", dashboard_data, duration_s=1.1, color=(150, 110, 0))
+                    time.sleep(1.0)
+                print("\rRECORDING            ", flush=True)
                 obs = env.get_obs()
                 env.set_dynamic_offset(agent.act(obs))
+                kb_interface.banner("RECORDING", dashboard_data, duration_s=1.0, color=(0, 120, 60))
                 break
         logger.info(f"Press 's' to save the episode, 'd' to discard it")
 
@@ -332,10 +340,14 @@ def run_control_loop_prior(
                 logger.info(f"No data collected, skipping save")
                 continue
             saver_thread.save_episode(data_saver.buffer.copy())
+            kb_interface.banner(f"SAVING episode {num_traj}", dashboard_data, duration_s=3.0, color=(0, 120, 60))
+            last_action = f"episode {num_traj} SAVED"
             num_traj += 1
             logger.info(f"Successfully collected data")
         else:
-            logger.info(f"Failure")
+            kb_interface.banner(f"DISCARDED episode {num_traj}", dashboard_data, duration_s=3.0, color=(150, 30, 30))
+            last_action = f"episode {num_traj} DISCARDED"
+            logger.info(f"Episode discarded")
         from gello.utils.launch_utils import move_to_start_position
         if right_cfg is not None:
             move_to_start_position(env, agent, left_cfg=left_cfg, right_cfg=right_cfg)

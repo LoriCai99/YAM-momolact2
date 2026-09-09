@@ -31,6 +31,7 @@ class KBReset:
         self._small_font = pygame.font.SysFont("monospace", 16)
         self._popup_text = ""
         self._popup_until = 0.0
+        self._popup_color = None
         # The dashboard is a preview, not the control loop. Rendering three
         # 640x360 tiles via surfarray + smoothscale cost ~55 ms per call and
         # dragged the 30 Hz collection loop down to ~14 Hz (jerky arms) while
@@ -272,21 +273,41 @@ class KBReset:
         txt = self._small_font.render(text, True, (220, 220, 220))
         self._screen.blit(txt, (x + 10, y + 10))
 
-    def _show_popup(self, text: str, duration_s: float = 1.2) -> None:
+    def _show_popup(self, text: str, duration_s: float = 1.2, color=None) -> None:
         self._popup_text = text
         self._popup_until = pygame.time.get_ticks() / 1000.0 + duration_s
+        self._popup_color = color
+
+    def banner(self, text: str, dashboard_data: Optional[Dict[str, Any]] = None,
+               duration_s: float = 1.5, color=None) -> None:
+        """Show a large centred banner NOW (bypasses the 10 Hz render throttle).
+
+        Used for the 3-2-1 start countdown and the SAVING / DISCARDING signals, so
+        the operator always sees what the system just did with their keypress.
+        """
+        self._get_pressed()  # keep the event queue drained so the window stays responsive
+        self._show_popup(text, duration_s, color)
+        if dashboard_data is not None:
+            self._render_dashboard(dashboard_data)
+        else:
+            self._draw_popup()
+            pygame.display.flip()
+        self._last_render = time.time()
 
     def _draw_popup(self) -> None:
         now = pygame.time.get_ticks() / 1000.0
         if now > self._popup_until or not self._popup_text:
             return
-        popup_w = 360
-        popup_h = 70
+        popup_w = 620
+        popup_h = 120
         x = (self._screen_width - popup_w) // 2
         y = (self._screen_height - popup_h) // 2
-        pygame.draw.rect(self._screen, (20, 20, 20), pygame.Rect(x, y, popup_w, popup_h), border_radius=8)
-        pygame.draw.rect(self._screen, (210, 210, 210), pygame.Rect(x, y, popup_w, popup_h), width=2, border_radius=8)
-        txt = self._font.render(self._popup_text, True, (245, 245, 245))
+        fill = getattr(self, "_popup_color", None) or (20, 20, 20)
+        pygame.draw.rect(self._screen, fill, pygame.Rect(x, y, popup_w, popup_h), border_radius=10)
+        pygame.draw.rect(self._screen, (240, 240, 240), pygame.Rect(x, y, popup_w, popup_h), width=3, border_radius=10)
+        if not hasattr(self, "_big_font"):
+            self._big_font = pygame.font.SysFont("monospace", 44, bold=True)
+        txt = self._big_font.render(self._popup_text, True, (255, 255, 255))
         text_rect = txt.get_rect(center=(x + popup_w // 2, y + popup_h // 2))
         self._screen.blit(txt, text_rect)
 

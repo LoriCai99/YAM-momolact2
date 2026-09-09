@@ -178,9 +178,9 @@ colour pad window** (not the terminal — this catches everyone out):
 
 | Key | Action |
 |---|---|
-| **Enter** | start recording an episode |
-| `s` | end and **save** |
-| `d` | end and **discard** |
+| **Enter** | start recording — the pad counts **3-2-1** (get both hands on the leaders), then shows RECORDING |
+| `s` | end and **save** — pad shows a green `SAVING episode N` banner |
+| `d` | end and **discard** — pad shows a red `DISCARDED episode N` banner |
 
 On Ctrl-C or a crash: an episode you already pressed `s` on is finalised before
 exit; the take in progress (never saved) is discarded automatically.

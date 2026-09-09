@@ -56,3 +56,13 @@ def test_key_bindings_enter_s_d():
     assert press(pygame.K_s) == "save"
     assert press(pygame.K_d) == "discard"
     assert press(pygame.K_a) == "normal" and press(pygame.K_b) == "normal"  # old keys do nothing
+
+
+def test_banner_renders_immediately_and_bypasses_throttle():
+    kb = KBReset()
+    kb.render_hz = 0.001  # throttle would block a normal render for ~1000 s
+    t = time.time()
+    kb.banner("Starting in 3", _data(), duration_s=1.0, color=(150, 110, 0))
+    assert kb._popup_text == "Starting in 3" and kb._popup_color == (150, 110, 0)
+    assert kb._last_render >= t  # rendered now, not queued behind the throttle
+    kb.banner("SAVING episode 7", None, duration_s=1.0, color=(0, 120, 60))  # no dashboard data: still draws
