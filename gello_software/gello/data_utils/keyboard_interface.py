@@ -22,6 +22,7 @@ KEY_DISCARD = (pygame.K_d,)
 
 class KBReset:
     def __init__(self):
+        self._pending_keys: list = []
         pygame.init()
         self._screen_width = 1500
         self._screen_height = 900
@@ -85,6 +86,8 @@ class KBReset:
 
     def _get_pressed(self):
         pressed = []
+        pressed.extend(self._pending_keys)
+        self._pending_keys = []
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return [KEY_DISCARD]
@@ -285,7 +288,10 @@ class KBReset:
         Used for the 3-2-1 start countdown and the SAVING / DISCARDING signals, so
         the operator always sees what the system just did with their keypress.
         """
-        self._get_pressed()  # keep the event queue drained so the window stays responsive
+        # Drain the queue so the window stays responsive, but KEEP the keys: a 'd' pressed
+        # while a banner is up must still count on the next update().
+        keys = self._get_pressed()  # (call first: it rebinds self._pending_keys)
+        self._pending_keys.extend(keys)
         self._show_popup(text, duration_s, color)
         if dashboard_data is not None:
             self._render_dashboard(dashboard_data)

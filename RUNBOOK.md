@@ -198,8 +198,9 @@ after episodes 000035–000044 were recorded with the left camera frozen for 100
 of every frame and only a small status line said so.)
 
 **Headless (no pad):** add `--no_dashboard` and type the keys in the terminal —
-**Enter** start, `s`+Enter save, `d`+Enter discard. Status and stale warnings
-print to the terminal. Use it to rule the pad out; measurements show it is not
+**Enter** start, `s` save, `d` discard (single keypress, no Enter needed;
+the terminal is switched to cbreak mode and restored on exit). Status and
+stale warnings print to the terminal. Use it to rule the pad out; measurements show it is not
 the cause of camera drops (those are USB-level disconnects), but it costs
 nothing to run without it.
 
