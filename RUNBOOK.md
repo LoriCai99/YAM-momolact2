@@ -299,6 +299,22 @@ The older `molmoact_to_lerobot_v30.py` (v3.0, RGB only, 14-D joints) still works
 on the same raw episodes but needs the `yam_convert` env; it is not what flex-pi
 consumes. `lerobot.auto_convert` stays false.
 
+### 7.1 Handing a snapshot over
+
+**Hugging Face** (git-backed dataset repo; what flex-pi's training loads):
+`hf auth login` once, then
+`bash scripts/upload_flexpi_dataset.sh <user-or-org>/<name> /home/evan/yam_data/<snapshot>`
+(private by default; resumable). First upload 2026-09-08: `lololok/zip-bag-newdata-100-0908`.
+
+**UW Kopah** (S3-compatible, `https://s3.kopah.uw.edu`, reachable without VPN):
+```bash
+export KOPAH_ACCESS_KEY=... KOPAH_SECRET_KEY=...     # from the Kopah console; never commit
+bash scripts/upload_flexpi_dataset_kopah.sh <bucket>[/prefix] /home/evan/yam_data/<snapshot>
+```
+Uses `~/.local/bin/rclone` (installed 2026-09-08, user-local). Copies, then runs
+`rclone check` so every local file is confirmed on the bucket by size+hash.
+Re-running only transfers what changed.
+
 ## 8. Troubleshooting
 
 | Symptom | Cause | Fix |
