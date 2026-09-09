@@ -102,6 +102,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("data_dir", nargs="?")
     ap.add_argument("--episodes", type=int, nargs="*")
+    ap.add_argument("--summary", action="store_true", help="one line per episode: OK / BAD and why")
     a = ap.parse_args()
     d = a.data_dir
     if d is None:
@@ -113,6 +114,21 @@ def main() -> None:
         eps = [p for p in eps if int(os.path.basename(p)) in set(a.episodes)]
     if not eps:
         print(f"no episodes under {d}"); sys.exit(1)
+    if a.summary:
+        import contextlib, io
+        results = []
+        for e in eps:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                ok = inspect(e)
+            results.append(ok)
+            out = buf.getvalue()
+            head = next((l for l in out.splitlines() if l.strip().startswith(os.path.basename(e))), "").split(" | ")[0].strip()
+            reasons = [l.strip()[6:] for l in out.splitlines() if l.strip().startswith("WARN:")]
+            reasons = [r for r in reasons if "stale camera" in r or "did not move" in r or "gripper never" in r or "dropped" in r or "INCOMPLETE" in r] or reasons
+            print(f"  {'OK ' if ok else 'BAD'}  {head}" + (f"   <- {reasons[0]}" if reasons else ""))
+        print(f"\n{sum(results)}/{len(results)} clean under {d}")
+        sys.exit(0 if all(results) else 1)
     results = [inspect(e) for e in eps]
     print(f"\n{sum(results)}/{len(results)} episodes clean under {d}")
     sys.exit(0 if all(results) else 1)
