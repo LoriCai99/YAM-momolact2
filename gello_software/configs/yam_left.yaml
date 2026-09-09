@@ -6,7 +6,8 @@
 sensors:
   cameras:
     left_camera:
-      device_id: "335122270697"    # D405 (short range), left
+      device_id: "353322270868"    # D405 (short range), left. Replaced 2026-09-08
+                                   # (old 335122270697 died: enumerated but could not stream)
     front_camera:
       device_id: "922612071156"    # D435 (wide FOV), front/top role.
                                    # Must link at USB 3: at USB 2.1 a D435 offers no

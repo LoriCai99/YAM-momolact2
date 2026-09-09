@@ -24,7 +24,7 @@ this file as machine-specific and re-derive them with the diagnostics in §6.
 | Left GELLO | `FTAO9WPU` → Dynamixel IDs `1–7`, 57600 baud |
 | Right GELLO | `FTAO9WCV` → Dynamixel IDs `8–14`, 57600 baud |
 | Front/top camera | D435 `922612071156` |
-| Left camera | D405 `335122270697` |
+| Left camera | D405 `353322270868` (replaced 2026-09-08) |
 | Right camera | D405 `218622275075` |
 | Data output | `/home/evan/yam_data/<task_directory>/` |
 
@@ -59,14 +59,16 @@ for d in rs.context().query_devices():
 
 Teleop is unaffected — it never opens cameras.
 
-**② The left D405 (`335122270697`) is defective — replace it.**
-It disconnected from USB 60+ times on 2026-09-08 and periodically enumerates
-without streaming. After swapping its cable AND port with the right D405, the
-dropouts followed the camera (`usb 2-8`, its new port), not the cable. Seven
-episodes were lost to a frozen left-wrist view. Any RealSense D4xx works as a
-replacement: put its serial under `left_camera` in `configs/yam_left.yaml`, run
-`python scripts/check_cameras.py` (must be READY) and
-`python scripts/test_camera_drop.py --reset-serial <serial>` (must PASS).
+**② RESOLVED 2026-09-08 — the left D405 was replaced.** The original unit
+(`335122270697`) disconnected from USB 60+ times, enumerated without streaming
+(`xioctl VIDIOC_S_FMT errno=5`), and the fault followed the camera through a
+cable and port swap. Eighteen episodes (000008–000044, see `inspect_episodes.py
+--summary`) have a frozen left-wrist view and must not be used. The replacement
+D405 `353322270868` is in `configs/yam_left.yaml`; `check_cameras.py` reports
+READY. If a camera is ever swapped again: put its serial under `left_camera`,
+run `python scripts/check_cameras.py` (must be READY) and
+`python scripts/test_camera_drop.py --reset-serial <serial>` (must PASS), and
+check its aim with `python scripts/view_cameras.py`.
 
 **③ The RIGHT GELLO trigger does not spring back.** Calibration is done (both
 triggers measured 2026-09-08), but the right trigger stays wherever it is left, so
