@@ -28,7 +28,7 @@ robot:
   # floor. The 2026-09-02 note that claimed can1 = left came from a wiggle test
   # that was performed on the right arm. /home/evan/carter/STATUS.md (can0 = left)
   # was right all along.
-  channel: can0
+  channel: can1
 agent:
   _target_: gello.agents.gello_agent.GelloAgent
   # VERIFIED 2026-09-08 with scripts/identify_sides.py: FTAO9WPU is the leader on

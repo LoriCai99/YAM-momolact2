@@ -2,7 +2,7 @@ robot:
   _target_: gello.robots.yam.YAMRobot
   # can1 = RIGHT arm. VERIFIED 2026-09-08 with scripts/identify_sides.py (moving
   # the right arm by hand moved can1 only). See yam_left.yaml.
-  channel: can1
+  channel: can0
 agent:
   _target_: gello.agents.gello_agent.GelloAgent
   # VERIFIED 2026-09-08 with scripts/identify_sides.py: FTAO9WCV is the leader on

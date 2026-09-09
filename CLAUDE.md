@@ -110,6 +110,17 @@ plug at the camera; stalls come 25–45 s in, with the arm extended. Physical fi
 from librealsense serials (e.g. `235123073950` vs `335122270697`) — do not match
 cameras to ports by descriptor serial.
 
+## CAN adapter names are NOT stable across re-plugs (2026-09-09)
+
+`can0`/`can1` are assigned in USB enumeration order; there are no udev rules. On
+2026-09-09 one gs_usb adapter had moved from USB `1-8` to `1-5` and the sides swapped
+(left leader drove the right arm). The adapters ARE distinguishable by their USB serial
+(`cat /sys/class/net/canN/device/../serial`): `00630059594E501820313332` and
+`003D0065594E501820313332`. Whenever teleop feels mirrored: check the serials, swap
+`channel:` in `yam_left.yaml`/`yam_right.yaml`, or run `scripts/identify_sides.py`.
+Config as of 2026-09-09: LEFT = `can1` (adapter `003D…`, USB 1-5), RIGHT = `can0`
+(adapter `0063…`, USB 1-7). A udev rule keyed on the serial would make this permanent.
+
 ## Diagnostic scripts added 2026-09-02
 
 Written while bringing this workstation up; all live in `gello_software/scripts/`.
