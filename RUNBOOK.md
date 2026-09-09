@@ -59,12 +59,19 @@ for d in rs.context().query_devices():
 
 Teleop is unaffected — it never opens cameras.
 
-**② The RIGHT GELLO gripper (leader `FTAO9WCV`) is mis-calibrated.**
-It rests at 113.03°, past its configured closed bound of 108.37°, so the
-normalized command saturates above 1.0 and that gripper sits pinned closed.
-Both configs shipped with *identical* `gripper_config` values copied from another
-workstation's GELLO build. Fix with §6.4. Its spring return is also mechanically
-weak — that part is not a software problem.
+**② The left D405 (`335122270697`) is defective — replace it.**
+It disconnected from USB 60+ times on 2026-09-08 and periodically enumerates
+without streaming. After swapping its cable AND port with the right D405, the
+dropouts followed the camera (`usb 2-8`, its new port), not the cable. Seven
+episodes were lost to a frozen left-wrist view. Any RealSense D4xx works as a
+replacement: put its serial under `left_camera` in `configs/yam_left.yaml`, run
+`python scripts/check_cameras.py` (must be READY) and
+`python scripts/test_camera_drop.py --reset-serial <serial>` (must PASS).
+
+**③ The RIGHT GELLO trigger does not spring back.** Calibration is done (both
+triggers measured 2026-09-08), but the right trigger stays wherever it is left, so
+the follower gripper idles partly closed unless the operator pushes it open. Fix
+the spring/elastic; software cannot.
 
 ---
 

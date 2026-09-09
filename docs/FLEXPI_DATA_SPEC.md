@@ -120,6 +120,14 @@ mount the D435 higher/further back so its 69° covers the same table area their 
 did (framing parity, not lens parity); or accept the gap and let finetuning absorb
 it. Decide this **before** the 100 episodes — it is baked into every frame.
 
+## 3b. Dataset status (2026-09-08)
+
+`/home/evan/yam_data/put_pen_in_bag_flexpi_v21`: **12 episodes, 15 768 frames (8.8 min)**,
+validator 53/53. Seven further raw episodes were recorded but are excluded by
+`flexpi_convert.py` (default `--max_stale_frac 0`) because the left wrist camera was
+frozen for 22–100 % of their frames (defective D405, see RUNBOOK §2②). Raw episodes
+stay on disk; `inspect_episodes.py` lists which are clean.
+
 ## 4. Collection protocol (what the operator does)
 
 * Instruction is fixed to flex-pi's exact string (config `storage.language_instruction`).
