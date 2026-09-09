@@ -241,6 +241,7 @@ def run_control_loop_prior(
     start_time = time.time()
     last_save_time = time.time()
     last_action = ""
+    _last_stale_log = 0.0
 
     # implemented in env.py to allow dynamic offset during data collection
     env.set_original_offset(agent.act(env.get_obs()))
@@ -286,13 +287,24 @@ def run_control_loop_prior(
             dashboard_data = build_dashboard_data(
                 obs=obs,
                 phase="waiting_start",
-                status_text=("Press Enter to start (3-2-1 countdown)" + (f"   |   last: {last_action}" if last_action else "")),
+                status_text=(("!! CAMERA DEAD: " + ", ".join(obs["camera_stale"]) + " -- Enter disabled; fix the camera")
+                             if (obs.get("camera_stale") or []) else
+                             "Press Enter to start (3-2-1 countdown)" + (f"   |   last: {last_action}" if last_action else "")),
                 traj_idx=num_traj,
                 total_traj=left_cfg['storage']['episodes'],
                 step_idx=0,
                 max_steps=left_cfg['collection']['max_episode_length'],
             )
             result = kb_interface.update(dashboard_data)
+            if result != "start":
+                obs = env.get_obs()  # keep the camera-stale state current while waiting
+            dead = obs.get("camera_stale") or []
+            if dead and time.time() - _last_stale_log > 2.0:
+                logger.error(f"CAMERA DEAD/STALE: {', '.join(dead)} -- Enter is disabled until it recovers")
+                _last_stale_log = time.time()
+            if result == "start" and dead:
+                kb_interface.banner(f"CAMERA DEAD: {', '.join(dead)}", dashboard_data, duration_s=2.5, color=(160, 20, 20))
+                continue
             if result == "start":
                 logger.info("Enter pressed; 3-2-1 countdown before recording")
                 # Three seconds to get both hands on the leaders. The pad shows the
@@ -326,6 +338,11 @@ def run_control_loop_prior(
                 max_steps=max_episode_length,
             )
             result = kb_interface.update(dashboard_data)
+            if _stale and step_idx % 15 == 0:  # ~2x per second: unmissable, still cheap
+                kb_interface.banner(f"CAMERA STALE: {', '.join(_stale)} -- press D", dashboard_data, duration_s=0.6, color=(160, 20, 20))
+                if time.time() - _last_stale_log > 2.0:
+                    logger.error(f"CAMERA STALE during recording: {', '.join(_stale)} -- this take should be discarded (D)")
+                    _last_stale_log = time.time()
             if result == "save" or result == "discard":
                 break
             else:

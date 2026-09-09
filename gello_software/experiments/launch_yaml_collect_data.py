@@ -318,6 +318,10 @@ class Args:
     right_config_path: Optional[str] = None
     """Path to the right arm configuration YAML file (for bimanual operation)."""
 
+    no_dashboard: bool = False
+    """Run without the pygame pad: Enter / s / d are typed in the terminal instead.
+    Camera-stale warnings are logged to the terminal in both modes."""
+
     dry_run: bool = False
     """Debug run: everything runs exactly as in a real session (arms, leaders,
     cameras, recorder), but episodes go to a throwaway temp directory that is
@@ -558,7 +562,12 @@ def main():
         fps=left_cfg.get("hz", 30),
         camera_roles=(left_cfg.get("flexpi") or {}).get("camera_map"),
     )
-    kb_interface = KBReset()
+    if args.no_dashboard:
+        from gello.data_utils.terminal_keys import TerminalKeys
+
+        kb_interface = TerminalKeys()
+    else:
+        kb_interface = KBReset()
 
 
 
