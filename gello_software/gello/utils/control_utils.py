@@ -273,7 +273,10 @@ def run_control_loop_prior(
             "cameras": camera_frames,
         }
 
-    while num_traj <= left_cfg['storage']['episodes']:
+    # storage.episodes is a display target only: the session runs until Ctrl-C.
+    # (It used to be a hard cap on the episode INDEX, which exited immediately once
+    # the dataset had grown past it -- 2026-09-08, index 102 vs episodes: 100.)
+    while True:
         obs = env.get_obs()
         data_saver.reset_buffer()
 
@@ -324,7 +327,7 @@ def run_control_loop_prior(
         max_episode_length = left_cfg['collection']['max_episode_length']
         for step_idx in tqdm.tqdm(
             range(max_episode_length),
-            desc=f"Collecting data {num_traj}/{left_cfg['storage']['episodes']}",
+            desc=f"Collecting episode {num_traj} (target {left_cfg['storage']['episodes']})",
         ):
             _stale = obs.get("camera_stale") or []
             dashboard_data = build_dashboard_data(

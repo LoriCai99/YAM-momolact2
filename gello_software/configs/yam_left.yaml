@@ -72,7 +72,7 @@ collection:
 
 # Data storage configuration
 storage:
-  episodes: 100
+  episodes: 100     # display target only; the session runs until Ctrl-C
   base_dir: "/home/evan/yam_data"
   task_directory: "put_pen_in_bag"
   # EXACT string flex-pi/soft_bag_zipping was trained with (meta/tasks.jsonl).
