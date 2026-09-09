@@ -120,6 +120,18 @@ mount the D435 higher/further back so its 69° covers the same table area their 
 did (framing parity, not lens parity); or accept the gap and let finetuning absorb
 it. Decide this **before** the 100 episodes — it is baked into every frame.
 
+## 3a. What is kept on disk (nothing is ever deleted by processing)
+
+| Directory | Content | Who uses it |
+|---|---|---|
+| `put_pen_in_bag/` | **raw, authoritative**: per-frame JPEG q95 RGB, lossless 16-bit depth, JSON, meta | everything downstream; never modified by the converter |
+| `put_pen_in_bag_flexpi_v21/` | flex-pi v2.1, **clean episodes only** (default `--max_stale_frac 0`) | hand this to training |
+| `put_pen_in_bag_flexpi_v21_all_incl_stale/` | flex-pi v2.1, **every raw episode** (`--max_stale_frac 1.0`) | for your own judgement; stale episodes are listed in the converter output |
+
+Each set's `meta/info.json` → `source_dirs` maps its renumbered episodes back to the
+raw `NNNNNN` directories. Re-running the converter with `--overwrite` rebuilds a
+processed set from the raw data; it never touches `put_pen_in_bag/`.
+
 ## 3b. Dataset status (2026-09-08)
 
 `/home/evan/yam_data/put_pen_in_bag_flexpi_v21`: **12 episodes, 15 768 frames (8.8 min)**,
