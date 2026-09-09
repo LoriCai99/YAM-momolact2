@@ -310,13 +310,17 @@ def wait_for_server_ready(port, host="127.0.0.1", timeout_seconds=5):
     return False
 
 
+_GELLO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 @dataclass
 class Args:
-    left_config_path: str
-    """Path to the left arm configuration YAML file."""
+    left_config_path: str = os.path.join(_GELLO_DIR, "configs", "yam_left.yaml")
+    """Path to the left arm configuration YAML file (default: the active configs/yam_left.yaml)."""
 
-    right_config_path: Optional[str] = None
-    """Path to the right arm configuration YAML file (for bimanual operation)."""
+    right_config_path: Optional[str] = os.path.join(_GELLO_DIR, "configs", "yam_right.yaml")
+    """Path to the right arm configuration YAML file. Default: configs/yam_right.yaml (bimanual).
+    Pass an empty string for single-arm operation."""
 
     no_dashboard: bool = False
     """Run without the pygame pad: Enter / s / d are typed in the terminal instead.
@@ -501,7 +505,7 @@ def main():
 
     args = tyro.cli(Args)
 
-    bimanual = args.right_config_path is not None
+    bimanual = bool(args.right_config_path)
 
     # Load configs
     left_cfg = OmegaConf.to_container(
