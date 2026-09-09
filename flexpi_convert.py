@@ -190,6 +190,7 @@ def load_episode(ep_dir: Path) -> Dict[str, Any]:
         "meta": meta,
         "cams": cams,
         "length": len(rows),
+        "stale_frames": sum(1 for r in rows if r.get("camera_stale")),
     }
 
 
@@ -397,6 +398,7 @@ def convert(
     overwrite: bool = False,
     require_all_cameras: bool = True,
     quiet: bool = False,
+    max_stale_frac: float = 0.0,
 ) -> Dict[str, Any]:
     from tqdm import tqdm
 
@@ -427,8 +429,25 @@ def convert(
     cams_used: Optional[List[str]] = None
     warnings: List[str] = []
 
-    for new_idx, ep_dir in enumerate(tqdm(ep_dirs, desc="episodes", disable=quiet)):
+    # Drop episodes where a camera was stale (frozen frame) for more than
+    # max_stale_frac of the frames: a frozen wrist view is wrong training data.
+    loaded = []
+    excluded: List[str] = []
+    for ep_dir in ep_dirs:
         ep = load_episode(ep_dir)
+        frac = ep["stale_frames"] / max(ep["length"], 1)
+        if frac > max_stale_frac:
+            excluded.append(f"{ep_dir.name} ({100 * frac:.0f}% frames with a stale camera)")
+            continue
+        loaded.append(ep)
+    if excluded:
+        warnings.append("excluded stale-camera episodes: " + "; ".join(excluded))
+    if not loaded:
+        raise ValueError("every episode was excluded for stale cameras")
+    ep_dirs = [ep["dir"] for ep in loaded]
+
+    for new_idx, ep in enumerate(tqdm(loaded, desc="episodes", disable=quiet)):
+        ep_dir = ep["dir"]
         if task_text is None:
             task_text = ep["instruction"]
         elif ep["instruction"] and ep["instruction"] != task_text:
@@ -570,6 +589,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     ap.add_argument("--depth_scale", action="append", default=[], metavar="CAM=M_PER_UNIT",
                     help="override/supply depth scale, e.g. front=0.001 (only for episodes without meta.json)")
     ap.add_argument("--allow_missing_cameras", action="store_true")
+    ap.add_argument("--max_stale_frac", type=float, default=0.0,
+                    help="exclude episodes with more than this fraction of frames having a stale camera (default 0 = any stall excludes)")
     ap.add_argument("--overwrite", action="store_true")
     args = ap.parse_args(argv)
 
@@ -587,6 +608,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         action_mode=pick("action_mode", "next_joint_fields"), rgb_crf=pick("rgb_crf", 20),
         workers=pick("workers", 8), depth_scale_override=ds_override or None, episodes=args.episodes,
         overwrite=args.overwrite, require_all_cameras=not args.allow_missing_cameras,
+        max_stale_frac=args.max_stale_frac,
     )
 
 
