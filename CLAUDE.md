@@ -84,6 +84,19 @@ bash gello_software/scripts/start_camera_server.sh    # script hardcodes --confi
 
 Set `eval.camera_server.enabled: false` to fall back to the in-process camera path (slower; the viewer freezes during inference). Data collection / replay / open-loop launchers still use the in-process path — the flag is per-launcher.
 
+## Dead-camera policy in the collection loop (2026-09-08)
+
+A camera with no new frame for 0.5 s is "stale"; `obs["camera_stale"]` lists it
+and every saved row records it. The loop refuses Enter while any camera is
+stale (red `CAMERA DEAD` banner, terminal log every 2 s) and flashes a red
+banner + terminal log during a take. `--no_dashboard` swaps the pygame pad for
+`gello/data_utils/terminal_keys.py` (Enter / s / d typed in the terminal, same
+`update()`/`banner()` interface). Why: episodes 000035–000044 were recorded
+with the left D405 frozen for 100% of frames; the only warning was a status
+line on the pad and nothing in the terminal. The server's reconnects failed
+with `xioctl(VIDIOC_S_FMT) errno=5` — the camera re-enumerates but cannot
+stream; hardware, not the pad.
+
 ## Diagnostic scripts added 2026-09-02
 
 Written while bringing this workstation up; all live in `gello_software/scripts/`.

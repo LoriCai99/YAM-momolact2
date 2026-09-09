@@ -189,6 +189,20 @@ colour pad window** (not the terminal — this catches everyone out):
 | `s` | end and **save** — pad shows a green `SAVING episode N` banner |
 | `d` | end and **discard** — pad shows a red `DISCARDED episode N` banner |
 
+**A dead camera blocks Enter.** If any camera is stale (no new frame for 0.5 s)
+the waiting screen says `!! CAMERA DEAD: <cam> -- Enter disabled` and the
+terminal logs `CAMERA DEAD/STALE` every 2 s; Enter is refused until it recovers.
+If a camera dies *during* a take the pad flashes a red `CAMERA STALE ... press D`
+banner twice a second and the terminal logs it — press `d`. (Added 2026-09-08
+after episodes 000035–000044 were recorded with the left camera frozen for 100%
+of every frame and only a small status line said so.)
+
+**Headless (no pad):** add `--no_dashboard` and type the keys in the terminal —
+**Enter** start, `s`+Enter save, `d`+Enter discard. Status and stale warnings
+print to the terminal. Use it to rule the pad out; measurements show it is not
+the cause of camera drops (those are USB-level disconnects), but it costs
+nothing to run without it.
+
 On Ctrl-C or a crash: an episode you already pressed `s` on is finalised before
 exit; the take in progress (never saved) is discarded automatically.
 
@@ -289,7 +303,7 @@ consumes. `lerobot.auto_convert` stays false.
 | Both arms go limp right after launch; log shows `fail to communicate with the motor 1` / `loss communication` | Arms constructed while cameras + leaders already load the process (GIL stall > 400 ms watchdog) | Fixed in the launcher (arms built first). If it recurs, check nothing else heavy runs in-process before the robots |
 | Session dies with `loss communication` | `enable_auto_recovery` defaults to False (fail-fast) | Restart. Already-saved episodes are intact |
 | `camera server exited with code …` / `did not answer within 60s` | The child camera server failed to start (cameras busy, USB, bad config) | Read the log path printed at startup; `python scripts/check_cameras.py`; `pkill -f camera_server` if a stale one holds the devices |
-| Pad shows `!! CAMERA STALE: <cam>` mid-episode | That camera stopped delivering frames (USB drop). The loop keeps running; the other cameras keep flowing | Finish the take with `d`. A camera that comes back recovers on its own (~2 s). Frames with a stale camera are logged per row and `inspect_episodes.py` WARNs |
+| Pad flashes red `CAMERA STALE: <cam> -- press D` mid-episode (terminal logs it too) | That camera stopped delivering frames (USB drop). The loop keeps running; the other cameras keep flowing | Finish the take with `d`. A camera that comes back recovers on its own (~2 s). Frames with a stale camera are logged per row and `inspect_episodes.py` WARNs |
 | `camera server stopped publishing: no frame set for 3.0s` | The whole camera server went silent (process died, or every camera gone) | Read `/tmp/yam_camera_server_<pid>.log` and the session log `/tmp/yam_collect_<pid>.log` |
 | A camera enumerates but streams **0 frames**, or `dmesg` shows repeated `usb 2-N: USB disconnect` for it | Cable / port / camera fault (left D405 on 2026-09-08: 63 disconnects in a day, then 0 frames while enumerated) | Swap its cable with a known-good one, then another port; if it still does not stream, replace the camera. `python scripts/test_camera_drop.py --reset-serial <serial>` validates recovery |
 | Arms jerky during collection | Loop below 30 Hz or GIL contention in the arms' process | Confirm `collection.camera_mode: subprocess` and that the dashboard is not modified to render every tick |
