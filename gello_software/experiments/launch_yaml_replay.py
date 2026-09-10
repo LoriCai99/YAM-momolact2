@@ -240,7 +240,7 @@ def main():
         camera_trajectory = False
 
     data_replayer = DataReplayer(save_format=left_cfg['storage']['save_format'], old_format=left_cfg['storage']['old_format'])
-    data_replayer.load_episode(left_cfg['storage']['base_dir'] + '/' + task, episode_number)
+    data_replayer.load_episode(left_cfg['storage']['base_dir'] + '/' + task, episode_number, load_images=camera_trajectory)
     data_replayer.replay(env, visual=camera_trajectory, robot_trajectory=robot_trajectory)
 
     cleanup()

@@ -59,7 +59,9 @@ class DataReplayer():
         if plt is not None:
             plt.ion()  # Turn on interactive mode
 
-    def load_episode(self, root_dir, episode_number):
+    def load_episode(self, root_dir, episode_number, load_images: bool = False):
+        """Load the joint trajectory; decode the camera images only if ``load_images``
+        (robot-only replay does not need ~3 GB of frames in memory)."""
         # convention: 6 digits for episode number
         episode_number = f"{int(episode_number):06d}"
         try:
@@ -107,9 +109,12 @@ class DataReplayer():
                 log_data_utils(f"Looking for images in: {right_camera_dir}", "info")
                 log_data_utils(f"Looking for images in: {front_camera_dir}", "info")
 
-                self.left_rgb_paths = sorted(glob.glob(os.path.join(left_camera_dir, "*.png")))
-                self.right_rgb_paths = sorted(glob.glob(os.path.join(right_camera_dir, "*.png")))
-                self.front_rgb_paths = sorted(glob.glob(os.path.join(front_camera_dir, "*.png")))
+                def _images(d):  # the streaming recorder writes JPEG; older data is PNG
+                    return sorted(p for ext in ("*.png", "*.jpg", "*.jpeg") for p in glob.glob(os.path.join(d, ext)))
+
+                self.left_rgb_paths = _images(left_camera_dir)
+                self.right_rgb_paths = _images(right_camera_dir)
+                self.front_rgb_paths = _images(front_camera_dir)
 
                 log_data_utils(f"Found {len(self.left_rgb_paths)} left camera images", "info")
                 log_data_utils(f"Found {len(self.right_rgb_paths)} right camera images", "info")
@@ -170,20 +175,23 @@ class DataReplayer():
                         log_data_utils(f"Error processing image {path}: {str(e)}", "error")
                         return None
 
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    # Use map to load all images concurrently for each path
-                    left_images = list(executor.map(load_image, self.left_rgb_paths))
-                    right_images = list(executor.map(load_image, self.right_rgb_paths))
-                    front_images = list(executor.map(load_image, self.front_rgb_paths))
+                if load_images:
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        # Use map to load all images concurrently for each path
+                        left_images = list(executor.map(load_image, self.left_rgb_paths))
+                        right_images = list(executor.map(load_image, self.right_rgb_paths))
+                        front_images = list(executor.map(load_image, self.front_rgb_paths))
 
-                # Insert images into demo (ensure each image corresponds to the correct demo step)
-                for i, demo_step in enumerate(self.demo):
-                    if left_images[i] is not None:
-                        demo_step["image_left_rgb"] = left_images[i]
-                    if right_images[i] is not None:
-                        demo_step["image_right_rgb"] = right_images[i]
-                    if front_images[i] is not None:
-                        demo_step["image_front_rgb"] = front_images[i]
+                    # Insert images into demo (each image corresponds to its demo step)
+                    for i, demo_step in enumerate(self.demo):
+                        if i < len(left_images) and left_images[i] is not None:
+                            demo_step["image_left_rgb"] = left_images[i]
+                        if i < len(right_images) and right_images[i] is not None:
+                            demo_step["image_right_rgb"] = right_images[i]
+                        if i < len(front_images) and front_images[i] is not None:
+                            demo_step["image_front_rgb"] = front_images[i]
+                else:
+                    log_data_utils("Robot-only replay: camera images not decoded", "info")
                 # self.demo[self.main_camera_key] = np.stack([np.array(Image.open(path)) for path in self.main_rgb_paths])
                 # self.demo[self.wrist_camera_key] = np.stack([np.array(Image.open(path)) for path in self.wrist_rgb_paths])
                 log_data_utils(f"Replaying episode from: {demo_dir}", "info")
