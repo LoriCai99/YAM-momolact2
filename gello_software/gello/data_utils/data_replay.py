@@ -17,7 +17,10 @@ import glob
 from PIL import Image
 
 # Add matplotlib imports for visualization
-import matplotlib.pyplot as plt
+try:  # only needed for image replay (visual=True); the yam env has no matplotlib
+    import matplotlib.pyplot as plt
+except ImportError:  # pragma: no cover
+    plt = None
 from collections import deque
 
 from gello.utils.logging_utils import log_collect_demos
@@ -53,7 +56,8 @@ class DataReplayer():
         self.step_history = deque(maxlen=self.history_len)    # Keep last 100 step indices
 
         # Initialize matplotlib backend for real-time plotting
-        plt.ion()  # Turn on interactive mode
+        if plt is not None:
+            plt.ion()  # Turn on interactive mode
 
     def load_episode(self, root_dir, episode_number):
         # convention: 6 digits for episode number
@@ -223,6 +227,9 @@ class DataReplayer():
         return self.demo["language_instruction"]
 
     def replay(self, env: RobotEnv, visual: bool = False, robot_trajectory: bool = True):
+        if visual and plt is None:
+            log_data_utils("matplotlib not installed: image replay disabled (pip install matplotlib)", "warning")
+            visual = False
         if self.demo is None:
             log_data_utils("No demo data loaded. Please load a demo first.", "error")
             return
