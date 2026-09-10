@@ -146,6 +146,49 @@ def _stop_camera_server(proc: Optional[subprocess.Popen]) -> None:
 
 
 
+def _preflight_via_server(rep_endpoint: str, camera_cfg: dict) -> None:
+    """Pre-flight against a camera server that already holds the devices.
+
+    Opening the RealSense devices in-process would fail (errno=16 busy / errno=5)
+    while the server owns them (2026-09-09), so ask the server instead: every
+    configured role must be served with the configured serial, and a fresh obs must
+    have no stale camera.
+    """
+    from gello.cameras.camera_client import CameraClient
+
+    c = CameraClient(rep_endpoint, request_timeout_ms=3000)
+    try:
+        meta = c.get_meta()
+        obs = c.get_obs_full()
+    finally:
+        c.close()
+    stale = set(obs.get("stale") or [])
+    frames = obs.get("frames") or {}
+    print("Camera pre-flight via the running camera server:")
+    bad = []
+    for r in CAMERA_ROLES:
+        want = str(camera_cfg[r]["device_id"])
+        have = str((meta.get(r) or {}).get("device_id", "-"))
+        shape = tuple(frames[r].shape[:2]) if r in frames else None
+        problems = []
+        if have != want:
+            problems.append(f"server serves serial {have}, config wants {want}")
+        if shape is None:
+            problems.append("no frame from server")
+        elif shape != (STREAM_HEIGHT, STREAM_WIDTH):
+            problems.append(f"frame is {shape[1]}x{shape[0]}, need {STREAM_WIDTH}x{STREAM_HEIGHT}")
+        if r in stale:
+            problems.append("STALE (camera stopped delivering frames)")
+        print(f"  {r:13} {have:14} {'OK' if not problems else 'FAIL: ' + '; '.join(problems)}")
+        if problems:
+            bad.append(r)
+    if bad:
+        print("\nRefusing to start: the running camera server cannot provide the cameras above.")
+        print("If that server is stale, stop it and relaunch (the launcher then starts its own):")
+        print("    pkill -f gello.cameras.camera_server")
+        raise SystemExit(2)
+
+
 def _preflight_cameras(camera_cfg: dict) -> None:
     """Exit with a clear table if any configured camera cannot serve the required streams.
 
@@ -538,7 +581,10 @@ def main():
 
     # Fail fast on cameras BEFORE touching the GELLO ports, prompting about the
     # output dir, or energizing anything.
-    _preflight_cameras(left_cfg["sensors"]["cameras"])
+    if existing_server:
+        _preflight_via_server(cam_rep, left_cfg["sensors"]["cameras"])
+    else:
+        _preflight_cameras(left_cfg["sensors"]["cameras"])
     _cam_log = None
     if camera_mode == "subprocess" and not existing_server:
         # Spawn now so its ~5 s of pipeline start-up overlaps the arm construction.
