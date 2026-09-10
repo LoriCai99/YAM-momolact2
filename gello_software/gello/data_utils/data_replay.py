@@ -234,7 +234,20 @@ class DataReplayer():
             return None
         return self.demo["language_instruction"]
 
-    def replay(self, env: RobotEnv, visual: bool = False, robot_trajectory: bool = True):
+    # Real-time replay aborts if two consecutive recorded frames differ by more than this
+    # on any joint (a corrupted row would otherwise be sent as a single 33 ms jump).
+    REALTIME_MAX_FRAME_DELTA_RAD = 0.6
+
+    def replay(self, env: RobotEnv, visual: bool = False, robot_trajectory: bool = True,
+               realtime: bool = False):
+        """Replay the recorded joint trajectory.
+
+        realtime=False (default): velocity-limited -- each frame is reached through
+        sub-steps of <= 0.01 rad, one control tick each (~0.3 rad/s cap; roughly half
+        teleop speed, slow-motion on fast segments).
+        realtime=True: after a smooth interpolated move to frame 0, ONE recorded frame is
+        commanded per control tick (30 Hz), reproducing the teleop timing exactly.
+        """
         if visual and plt is None:
             log_data_utils("matplotlib not installed: image replay disabled (pip install matplotlib)", "warning")
             visual = False
@@ -276,7 +289,24 @@ class DataReplayer():
                     env.step(jnt)
                     time.sleep(0.001)
 
-            if robot_trajectory:
+            if robot_trajectory and realtime:
+                deltas = np.abs(np.diff(np.asarray(joints), axis=0)).max(axis=1) if demo_length > 1 else np.zeros(0)
+                if deltas.size and deltas.max() > self.REALTIME_MAX_FRAME_DELTA_RAD:
+                    i = int(deltas.argmax())
+                    raise RuntimeError(f"frame {i}->{i+1} jumps {deltas.max():.2f} rad on one joint; refusing real-time replay")
+                move_to_position(env, joints[0])  # smooth approach to the first frame
+                t0 = time.time()
+                for step_idx in tqdm(range(demo_length), desc="Replaying episode (real-time)"):
+                    env.step_command_only(joints[step_idx], reset=True)  # one frame per 30 Hz tick
+                wall = time.time() - t0
+                rec = None
+                try:
+                    rec = float(self.demo[-1]["timestamp"]) - float(self.demo[0]["timestamp"])
+                except Exception:  # noqa: BLE001
+                    pass
+                log_data_utils(f"real-time replay: {demo_length} frames in {wall:.1f}s"
+                               + (f" (recorded {rec:.1f}s)" if rec else ""), "info")
+            elif robot_trajectory:
                 for step_idx in tqdm(range(demo_length), desc="Replaying episode"):
                     target_joints = joints[step_idx]
 
