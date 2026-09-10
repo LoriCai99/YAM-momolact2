@@ -294,7 +294,9 @@ def log_demo_data_info(demo: Dict[str, Any], demo_dir: str) -> None:
     
     # Language instruction
     if "language_instruction" in demo:
-        log_data_utils(f"Language instruction: {demo['language_instruction'][0]}", "data_info")
+        instr = demo['language_instruction']
+        instr = instr if isinstance(instr, str) else (instr[0] if len(instr) else '')
+        log_data_utils(f"Language instruction: {instr}", "data_info")
     
     # Teleop device
     if "teleop_device" in demo:
