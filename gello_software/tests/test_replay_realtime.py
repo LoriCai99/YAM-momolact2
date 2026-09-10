@@ -39,3 +39,17 @@ def test_realtime_refuses_corrupted_jump(monkeypatch):
     traj = np.zeros((10, 14)); traj[5, 2] = 1.0  # a 1 rad jump between two frames
     with pytest.raises(RuntimeError):
         _replayer(traj).replay(_FakeEnv(np.zeros(14)), robot_trajectory=True, realtime=True)
+
+
+def test_eef_ik_mode_commands_ik_joints_close_to_recorded(monkeypatch):
+    """EE mode: FK -> IK round trip must reproduce the recorded joints within 5e-3 rad."""
+    pytest.importorskip("mink"); pytest.importorskip("i2rt")
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "")
+    n = 20
+    base = np.array([0.2, 0.9, 0.8, -0.3, 0.4, 0.2, 1.0] * 2)
+    traj = np.array([base + 0.01 * i * np.array([1, 1, -1, 0.5, 0.5, 0.2, 0] * 2) for i in range(n)])
+    env = _FakeEnv(traj[0])
+    _replayer(traj).replay(env, robot_trajectory=True, realtime=True, action_mode="eef_ik")
+    cmds = np.array(env.cmds[-n:])
+    assert np.abs(cmds - traj).max() < 5e-3
+    assert np.allclose(cmds[:, [6, 13]], traj[:, [6, 13]])  # grippers pass through

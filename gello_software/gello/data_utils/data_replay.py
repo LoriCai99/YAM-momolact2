@@ -239,7 +239,7 @@ class DataReplayer():
     REALTIME_MAX_FRAME_DELTA_RAD = 0.6
 
     def replay(self, env: RobotEnv, visual: bool = False, robot_trajectory: bool = True,
-               realtime: bool = False):
+               realtime: bool = False, action_mode: str = "joint"):
         """Replay the recorded joint trajectory.
 
         realtime=False (default): velocity-limited -- each frame is reached through
@@ -258,6 +258,21 @@ class DataReplayer():
         # demo_length = self.demo["left_raw_action"].shape[0]
         demo_length = len(self.demo)
         joints = [np.concatenate([self.demo[i]["left_joint"], self.demo[i]["right_joint"]]) for i in range(demo_length)]
+        if action_mode == "eef_ik":
+            # End-effector-space replay: FK each recorded frame to the grasp_site pose (the
+            # 32-D state the flex-pi dataset stores), IK it back with mink, command THAT.
+            # This exercises the same EE->joint path the deploy bridge uses. IK is solved
+            # for the whole episode up front so it never runs inside the 30 Hz loop.
+            from gello.utils.yam_kinematics import ee_roundtrip_trajectory
+
+            q_ik, err, secs, fails = ee_roundtrip_trajectory(np.asarray(joints, dtype=float))
+            log_data_utils(f"eef_ik: IK vs recorded joints max {err.max():.2e} rad (p99 {np.percentile(err, 99):.2e}); "
+                           f"solve p50 {np.percentile(secs, 50) * 1e3:.1f} ms; non-converged frames {fails}", "info")
+            if fails or err.max() > 0.05:
+                raise RuntimeError(f"eef_ik: IK trajectory unreliable ({fails} non-converged, max err {err.max():.3f} rad); not replaying")
+            joints = [q for q in q_ik]
+        elif action_mode != "joint":
+            raise ValueError(f"unknown action_mode {action_mode!r} (joint | eef_ik)")
         # print(actions)
         input(f"Press Enter to replay the episode or Ctrl+C to exit...")
 

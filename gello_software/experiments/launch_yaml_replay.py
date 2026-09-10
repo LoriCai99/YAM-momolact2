@@ -92,6 +92,11 @@ class Args:
     right_config_path: Optional[str] = None
     """Path to the right arm configuration YAML file (for bimanual operation)."""
 
+    action_mode: str = "joint"
+    """'joint': command the recorded joints. 'eef_ik': FK each frame to the gripper pose
+    (the dataset's EE state) and IK it back with mink before commanding -- the same
+    EE->joint path the deploy bridge uses. Check offline first: scripts/check_ee_roundtrip.py"""
+
     realtime: bool = False
     """Send one recorded frame per control tick (exact teleop timing) instead of the
     velocity-limited default (~half speed). The approach to frame 0 is always interpolated."""
@@ -245,7 +250,7 @@ def main():
 
     data_replayer = DataReplayer(save_format=left_cfg['storage']['save_format'], old_format=left_cfg['storage']['old_format'])
     data_replayer.load_episode(left_cfg['storage']['base_dir'] + '/' + task, episode_number, load_images=camera_trajectory)
-    data_replayer.replay(env, visual=camera_trajectory, robot_trajectory=robot_trajectory, realtime=args.realtime)
+    data_replayer.replay(env, visual=camera_trajectory, robot_trajectory=robot_trajectory, realtime=args.realtime, action_mode=args.action_mode)
 
     cleanup()
 
