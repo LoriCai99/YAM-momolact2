@@ -306,14 +306,19 @@ consumes. `lerobot.auto_convert` stays false.
 `bash scripts/upload_flexpi_dataset.sh <user-or-org>/<name> /home/evan/yam_data/<snapshot>`
 (private by default; resumable). First upload 2026-09-08: `lololok/zip-bag-newdata-100-0908`.
 
-**UW Kopah** (S3-compatible, `https://s3.kopah.uw.edu`, reachable without VPN):
+**UW Kopah** -- where the training team picks datasets up (S3-compatible,
+`https://s3.kopah.uw.edu`, no VPN needed, credentials already in `~/.s3cfg`):
 ```bash
-export KOPAH_ACCESS_KEY=... KOPAH_SECRET_KEY=...     # from the Kopah console; never commit
-bash scripts/upload_flexpi_dataset_kopah.sh rselab/<prefix> /home/evan/yam_data/<snapshot>
+bash scripts/upload_flexpi_dataset_kopah.sh /home/evan/yam_data/<snapshot>
 ```
-Uses `~/.local/bin/rclone` (installed 2026-09-08, user-local). Copies, then runs
-`rclone check` so every local file is confirmed on the bucket by size+hash.
-Re-running only transfers what changed.
+Uses `~/.local/bin/s3cmd sync` (64 MB multipart, never deletes remote files), then compares
+the local file count with the object count. The snapshot's directory name becomes the last
+path element under `s3://rselab/datasets/yam/`, so the team pulls it with
+`s3cmd get -r s3://rselab/datasets/yam/<snapshot>/ ./`. Pass a different prefix as a second
+argument. Re-running only transfers what changed.
+
+Keep the local snapshot directory name identical to the S3 path element -- the uploader
+derives one from the other, and the team's pull command is the directory name.
 
 `s3cmd` (2.4.0, `~/.local/bin`, installed 2026-09-09 via `uv tool`) is also set up for
 Kopah: `~/.s3cfg` (mode 600) already points at `s3.kopah.uw.edu` path-style over HTTPS;
