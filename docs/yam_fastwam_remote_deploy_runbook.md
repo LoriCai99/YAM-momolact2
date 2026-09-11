@@ -130,6 +130,13 @@ s3cmd get $SRC/checkpoints/weights/step_XXXXXX.pt $DST/checkpoints/weights/
 
 About 30 MB/s, so 12 GB takes 6–7 minutes.
 
+### 4.0 The 0904 mm2yam base run (`0907/.../0904_mm2yam_..._scratch`)
+
+Steps on Kopah: 040000, 047000, **053838 (final; the base the 0910 finetunes start from)**.
+On the server: `step_047000.pt` (boot: `serve_pen.sh`) and, since 2026-09-10,
+`step_053838.pt` (boot: `serve_pen_0904_53838.sh`). Trained before any RealSense data from
+this rig existed (ZED flex-pi data + anydata), so rollouts here are domain-gap probes.
+
 ### 4.1 Checkpoint 0910 `pen3_ft_mm2yam` step 022000 (added 2026-09-10)
 
 Finetuned from the 0904 mm2yam checkpoint on flex-pi's 300 pen episodes **plus this rig's
