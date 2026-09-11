@@ -309,11 +309,25 @@ consumes. `lerobot.auto_convert` stays false.
 **UW Kopah** (S3-compatible, `https://s3.kopah.uw.edu`, reachable without VPN):
 ```bash
 export KOPAH_ACCESS_KEY=... KOPAH_SECRET_KEY=...     # from the Kopah console; never commit
-bash scripts/upload_flexpi_dataset_kopah.sh <bucket>[/prefix] /home/evan/yam_data/<snapshot>
+bash scripts/upload_flexpi_dataset_kopah.sh rselab/<prefix> /home/evan/yam_data/<snapshot>
 ```
 Uses `~/.local/bin/rclone` (installed 2026-09-08, user-local). Copies, then runs
 `rclone check` so every local file is confirmed on the bucket by size+hash.
 Re-running only transfers what changed.
+
+`s3cmd` (2.4.0, `~/.local/bin`, installed 2026-09-09 via `uv tool`) is also set up for
+Kopah: `~/.s3cfg` (mode 600) already points at `s3.kopah.uw.edu` path-style over HTTPS;
+keys filled in and verified 2026-09-09. The lab's Kopah root is **`s3://rselab/`** (one
+bucket; top-level dirs are training-run names like `0708_hyak_pi_put_pen_into_bag_...`).
+`s3cmd ls s3://rselab/` browses, and
+`s3cmd sync --no-delete-removed /home/evan/yam_data/<snapshot>/ s3://rselab/<prefix>/<snapshot>/`
+is an alternative uploader (multipart, 64 MB chunks). First Kopah upload 2026-09-09:
+`s3://rselab/datasets/yam/put_pen_in_bag_flexpi_v21_Ai2_2026-09-08_allintra/` (735 files, 14.0 GB,
+all-intra rebuild of the 104-episode set; local dir has the same name; remote listing diffed
+against local, sizes match).
+Second upload 2026-09-09 (evening): `s3://rselab/datasets/yam/put_pen_in_bag_flexpi_v21_Ai2_2026-09-09_allintra/`
+(54 ep / 80,526 frames from raw 000140–000195, 385 files, 9.5 GB, verified the same way). `s3cmd ls` returning
+`403 (InvalidAccessKeyId)` means the keys in `~/.s3cfg` are still placeholders.
 
 ## 8. Troubleshooting
 

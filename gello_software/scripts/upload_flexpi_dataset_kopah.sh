@@ -1,25 +1,24 @@
 #!/usr/bin/env bash
-# Upload a built flex-pi snapshot to UW Kopah (S3-compatible) with rclone.
-# Usage:
-#   export KOPAH_ACCESS_KEY=... KOPAH_SECRET_KEY=...        # never commit these
-#   bash scripts/upload_flexpi_dataset_kopah.sh <bucket>[/prefix] /home/evan/yam_data/<snapshot_dir>
-# Example: bash scripts/upload_flexpi_dataset_kopah.sh mylab-bucket/yam/put_pen_in_bag \
-#              /home/evan/yam_data/put_pen_in_bag_flexpi_v21_2026-09-08_v2
-# Resumable: re-running only transfers files that are missing or differ (size+checksum).
+# Upload a built flex-pi snapshot to UW Kopah with s3cmd (credentials in ~/.s3cfg).
+#
+#   bash scripts/upload_flexpi_dataset_kopah.sh /home/evan/yam_data/<snapshot_dir> [s3://bucket/prefix]
+#
+# Default prefix is s3://rselab/datasets/yam/ ; the snapshot's own directory name becomes
+# the last path element, so the team pulls it back with
+#   s3cmd get -r s3://rselab/datasets/yam/<snapshot_dir>/ ./
+# Re-running only transfers changed files (sync), and never deletes anything remote.
 set -euo pipefail
-DEST="${1:?bucket[/prefix]}"
-DIR="${2:?snapshot directory}"
-: "${KOPAH_ACCESS_KEY:?export KOPAH_ACCESS_KEY}"; : "${KOPAH_SECRET_KEY:?export KOPAH_SECRET_KEY}"
-ENDPOINT="${KOPAH_ENDPOINT:-https://s3.kopah.uw.edu}"
+DIR="${1:?snapshot directory}"; DIR="${DIR%/}"
+PREFIX="${2:-s3://rselab/datasets/yam}"; PREFIX="${PREFIX%/}"
+S3CMD="${S3CMD:-$HOME/.local/bin/s3cmd}"
 [[ -f "$DIR/meta/info.json" ]] || { echo "not a dataset dir: $DIR"; exit 1; }
-RCLONE="${RCLONE:-$HOME/.local/bin/rclone}"
-# On-the-fly remote (no config file, keys stay in env): S3 provider "Other", path-style.
-R=":s3,provider=Other,endpoint=${ENDPOINT},access_key_id=${KOPAH_ACCESS_KEY},secret_access_key=${KOPAH_SECRET_KEY},force_path_style=true:"
+[[ -f "$HOME/.s3cfg" ]] || { echo "no ~/.s3cfg (Kopah credentials)"; exit 1; }
 NAME="$(basename "$DIR")"
-echo "-> ${ENDPOINT}  ${DEST}/${NAME}"
-"$RCLONE" copy "$DIR" "${R}${DEST}/${NAME}" --exclude ".cache/**" \
-    --transfers 8 --checkers 16 --s3-chunk-size 64M --s3-upload-concurrency 4 \
-    --progress --stats 30s --stats-one-line
+DEST="$PREFIX/$NAME/"
+echo "-> $DEST"
+"$S3CMD" sync --no-delete-removed --multipart-chunk-size-mb=64 --exclude '.cache/*' "$DIR/" "$DEST"
 echo "verifying..."
-"$RCLONE" check "$DIR" "${R}${DEST}/${NAME}" --exclude ".cache/**" --one-way && echo "OK: every local file is on Kopah with matching size/hash"
-echo "listing: $RCLONE lsd \"${R}${DEST}\""
+LOCAL=$(find "$DIR" -type f -not -path '*/.cache/*' | wc -l)
+REMOTE=$("$S3CMD" ls -r "$DEST" | wc -l)
+echo "  local files: $LOCAL | objects on Kopah: $REMOTE"
+[[ "$LOCAL" -eq "$REMOTE" ]] && echo "OK - pull with: s3cmd get -r $DEST ./" || { echo "MISMATCH - re-run to finish the sync"; exit 1; }
