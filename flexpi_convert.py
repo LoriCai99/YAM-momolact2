@@ -41,6 +41,7 @@ import argparse
 import json
 import math
 import os
+import pathlib
 import shutil
 import sys
 import time
@@ -547,6 +548,9 @@ def convert(
         json.dump({"builder": BUILDER, "ee_model": ee_model, "ee_site": ee_site, "action_mode": action_mode,
                    "rgb_crf": rgb_crf, "rgb_all_keyframes": True, "depth_all_keyframes": True,
                    "camera_map": camera_map, "source_data_dir": str(data_dir),
+                   # Which raw episode each dataset episode came from: dataset episode i is
+                   # source_episodes[i]. Lets a later build tell what is already covered.
+                   "source_episodes": [pathlib.Path(ep["dir"]).name for ep in loaded],
                    "converted_at": time.strftime("%Y-%m-%d %H:%M:%S"), "warnings": warnings}, f, indent=2)
 
     log(f"\nWrote {len(ep_dirs)} episodes / {total_frames} frames / {len(jobs)} videos -> {output_dir}")
