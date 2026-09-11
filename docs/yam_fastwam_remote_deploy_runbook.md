@@ -220,6 +220,32 @@ cut `--num-inference-steps` in `serve_pen.sh` (to 6 or 4) rather than lengthenin
 Never add `--glue-cache`; never point one checkpoint at another's TRT engine (both are
 explained in the sweep doc).
 
+## 6.1 Saving the predicted future video (added 2026-09-10)
+
+The server can write the model's imagined future for every chunk: decoded RGB plus DINO-PCA
+and pointmap-PCA rows, one MP4 per bridge connection. It is a **server** flag
+(`--record-predictions-dir`), so it needs its own boot; it forces the full-joint regime
+regardless of the bridge's `JOINT` setting (about 3x slower than action-only, the arms pause
+between chunks).
+
+```bash
+# server (stop the running server first: Ctrl+C or pkill -f serve_yam_fastwam)
+bash ~/venvs/fastwam_serve/serve_pen_0910_record.sh      # serve_pen_0910.sh + --record-predictions-dir ~/predictions --record-predictions-fps 8
+```
+
+Then run the bridge as usual. Ctrl+C on the bridge closes the connection and the server
+finalises `~/predictions/<timestamp>_<remote>/prediction.mp4`. Pull the videos to the
+workstation:
+
+```bash
+rsync -av rseyam@10.19.141.185:predictions/ /home/evan/yam_predictions/
+```
+
+Knobs (edit `serve_pen_0910_record.sh`): `--record-predictions-fps 32` for real-time-ish
+playback (default 8 = slow motion); `--record-predictions-frames-per-chunk 3` to keep only
+the frames that actually elapse before the next chunk (seamless timeline instead of the
+per-chunk anchor pattern). Incompatible with `--use-pinv-rtc`.
+
 ## 7. Troubleshooting
 
 | Symptom | Cause | Fix |
