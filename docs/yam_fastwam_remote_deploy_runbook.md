@@ -204,11 +204,15 @@ value over the first few chunks; it plus the network round trip must stay well u
 ## 6. Full-joint mode
 
 The doc's second boot per checkpoint. On this branch the regime is chosen by the bridge, not
-the server, so no server restart is needed. Edit `run_bridge.sh` and flip:
+the server (the server script has no `--infer-joint-*` flags), so no server restart is
+needed. `run_bridge.sh` takes a `JOINT` switch (added 2026-09-10):
 
+```bash
+JOINT=true bash /home/evan/projects/yam_deploy/run_bridge.sh     # full-joint
+bash /home/evan/projects/yam_deploy/run_bridge.sh                # action-only (default)
 ```
-joint_video=true joint_dino=true joint_pointmap=true
-```
+
+It sets `joint_video/joint_dino/joint_pointmap` in the bridge kwargs together.
 
 The prewarm on the 5090 took 786 ms in this regime. Add 80–150 ms of network and you are
 inside the 1067 ms chunk-32 runway with little margin. If the `wall=` line sits near 900 ms,
