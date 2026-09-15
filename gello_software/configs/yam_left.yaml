@@ -23,12 +23,12 @@ sensors:
 robot:
   _target_: gello.robots.yam.YAMRobot
   # This workstation exposes plain can0/can1 (no udev naming rules).
-  # can0 = LEFT arm. VERIFIED 2026-09-08 with scripts/identify_sides.py: moving
-  # the RIGHT arm by hand changed can1 only (0.170 rad), can0 stayed at its noise
-  # floor. The 2026-09-02 note that claimed can1 = left came from a wiggle test
-  # that was performed on the right arm. /home/evan/carter/STATUS.md (can0 = left)
-  # was right all along.
-  channel: can1
+  # can1 = LEFT arm, can0 = RIGHT arm. VERIFIED 2026-09-09 (continuous hand test,
+  # operator behind the arms: moving the RIGHT arm by hand changed can0 by 70 deg,
+  # can1 stayed at 0.0). The 2026-09-08 note (can0 = left) predates a replug of the
+  # right-arm CAN adapter (it moved from USB 1-8 to 1-5). After ANY re-cabling,
+  # re-run scripts/identify_sides.py or /home/evan/projects/yam_deploy/which_arm.py.
+  channel: can0
 agent:
   _target_: gello.agents.gello_agent.GelloAgent
   # VERIFIED 2026-09-08 with scripts/identify_sides.py: FTAO9WPU is the leader on

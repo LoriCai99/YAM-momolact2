@@ -1,8 +1,8 @@
 robot:
   _target_: gello.robots.yam.YAMRobot
-  # can1 = RIGHT arm. VERIFIED 2026-09-08 with scripts/identify_sides.py (moving
-  # the right arm by hand moved can1 only). See yam_left.yaml.
-  channel: can0
+  # can0 = RIGHT arm. VERIFIED 2026-09-09 (hand test: right arm moved can0 by 70 deg,
+  # can1 by 0.0). See yam_left.yaml.
+  channel: can1
 agent:
   _target_: gello.agents.gello_agent.GelloAgent
   # VERIFIED 2026-09-08 with scripts/identify_sides.py: FTAO9WCV is the leader on
@@ -19,7 +19,7 @@ agent:
     # at ~113.5 deg, just past the released bound, so hands-off = fully open.
     gripper_config: [14, 57.5288, 112.1880]
   # Gripper 1.0 = OPEN at home, same as the left arm (a released trigger is open).
-  start_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+  start_joints: [-0.0002, -0.0036, 0.0059, -0.0967, -0.0025, -0.0425, 1.0000]
 hz: 30
 max_steps: 1000
 

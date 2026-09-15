@@ -47,7 +47,7 @@ agent:
     # between sessions, and hands-off must always mean fully open (1.0).
     # Order is [id, squeezed_deg, released_deg].
     gripper_config: [7, 57.8716, 97.3]
-  start_joints: [0.0063, 0.0059, 0.0055, -0.1001, -0.0261, -0.6102, 1.0000]
+  start_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 hz: 30
 max_steps: 1000
 
@@ -74,12 +74,12 @@ collection:
 storage:
   episodes: 100     # display target only; the session runs until Ctrl-C
   base_dir: "/home/evan/yam_data"
-  task_directory: "spell_ai2_and_lift_4_blocks"
+  task_directory: "lift_4_blocks"
   # New task, collected from scratch on this rig -- NOT the flex-pi/soft_bag_zipping
   # string (that one had to stay verbatim because their language encoder was trained
   # on those tokens). This one is ours to choose, but keep it identical across every
   # session of this task: it is baked into every frame and into meta.json.
-  language_instruction: "First spell AI2 and put cat block at right to form a 4-block aligned line. then hold the 4 blocks in a row from two ends, lift them up, and put them down, ensuring they are aligned during the process"
+  language_instruction: "hold the 4 blocks in a row from two ends, lift them up, and put them down, ensuring they are aligned during the process"
   teleop_device: "gello" # ["oculus", "keyboard", "gello", "none"]
   save_format: "json" # ["json", "npy"]
   saver_max_workers: 4

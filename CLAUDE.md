@@ -27,7 +27,7 @@ Top-level layout:
 
 - **Conda env:** `yam` (Python 3.12) at `/opt/conda/envs/yam`. There is no `ai2_yam` env on this box. `yam_convert` is a separate, lerobot-only env (kept apart because lerobot needs `huggingface-hub>=1.0` while the MolmoAct server path needs `<1.0`).
 - **CAN interfaces:** plain **`can0`** and **`can1`** — there are no udev naming rules, so nothing produces `can_leader_l`/`can_follower_r`. Both are gs_usb (OpenMoko 1d50:606f) adapters; `can0` is USB path `1-7`, `can1` is `1-8`.
-  - **`can0` = LEFT arm, `can1` = RIGHT arm** — verified 2026-09-08 with `scripts/identify_sides.py` (moving the right arm by hand moved `can1` only). The 2026-09-02 wiggle test that recorded the opposite was performed on the right arm; `/home/evan/carter/STATUS.md` (can0 = left) was correct. **After any re-cabling, run `identify_sides.py`** — a mislabelled pair feels perfect in teleop but swaps left/right in every saved episode.
+  - **`can1` = LEFT arm, `can0` = RIGHT arm** — verified 2026-09-09 with a continuous hand test (operator behind the arms; moving the right arm by hand changed `can0` by 70°, `can1` by 0.0°), after the right-arm CAN adapter was replugged (USB 1-8 → 1-5). Commit d159a87 swapped the configs accordingly. The earlier 2026-09-08 result (can0 = left) was correct for the cabling of that day. **After any re-cabling, run `scripts/identify_sides.py`** (or `/home/evan/projects/yam_deploy/which_arm.py`, arms only) — a mislabelled pair feels perfect in teleop but swaps left/right in every saved episode.
 - **RealSense cameras:** D435 `922612071156` (front/top role), D405 `353322270868` (left; replaced 2026-09-08, old unit `335122270697` was defective), D405 `218622275075` (right) — confirmed against the physical rig by the operator 2026-09-02. Order must stay `[front/top, left, right]`, the order MolmoAct2 was trained on. Inspect live with `python gello_software/scripts/view_cameras.py` (3-pane cv2 viewer; `q` quits, `s` snapshots — quit it before teleop/collection, cameras are exclusive-access).
 - **Camera USB caveats.** The front D435 must link at USB 3 — at USB 2.1 it offers no colour 640x360 and collection refuses to start. It spent 2026-09-02→08 at USB 2.1 and the cause was the **USB-C cable** (no SuperSpeed wires; identical-looking), not the port or camera — swap the cable first if it recurs. Both D405s are USB 3.2 but were originally on `05:00.0`, an **ASMedia ASM2142/3142** controller that dropped both mid-session; recover without a reboot via `echo 1 | sudo tee /sys/bus/pci/devices/0000:05:00.0/remove && echo 1 | sudo tee /sys/bus/pci/rescan`. Keep them on separate controllers if possible.
 - **`i2rt` is NOT the vendored copy.** The `yam` env has an editable install pointing at `/home/evan/i2rt` (v1.2.4), which is *newer* than this repo's `i2rt/` subdir. `get_yam_robot()` there is API-compatible with `gello/robots/yam.py`, but be aware `import i2rt` never reads the in-repo tree.
@@ -118,8 +118,19 @@ cameras to ports by descriptor serial.
 (`cat /sys/class/net/canN/device/../serial`): `00630059594E501820313332` and
 `003D0065594E501820313332`. Whenever teleop feels mirrored: check the serials, swap
 `channel:` in `yam_left.yaml`/`yam_right.yaml`, or run `scripts/identify_sides.py`.
-Config as of 2026-09-09: LEFT = `can1` (adapter `003D…`, USB 1-5), RIGHT = `can0`
-(adapter `0063…`, USB 1-7). A udev rule keyed on the serial would make this permanent.
+The adapter serial is the ONLY stable identity — the interface name and the USB port
+both move. Observed so far:
+
+| Adapter serial | Arm | 2026-09-09 | 2026-09-14 |
+|---|---|---|---|
+| `003D0065594E501820313332` | LEFT | `can1`, USB 1-5 | `can0`, USB 1-8 |
+| `00630059594E501820313332` | RIGHT | `can0`, USB 1-7 | `can1`, USB 1-6 |
+
+So **check the serial, not the name**, after any replug:
+`for c in can0 can1; do d=$(readlink -f /sys/class/net/$c/device); echo "$c $(cat $(dirname $d)/serial)"; done`
+then set `channel:` in the left/right configs to match. A udev rule keyed on the serial
+would make this permanent and is the real fix; until someone adds it, this will recur
+every time the adapters re-enumerate.
 
 ## Diagnostic scripts added 2026-09-02
 
