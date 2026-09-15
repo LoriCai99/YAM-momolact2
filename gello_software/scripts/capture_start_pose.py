@@ -69,6 +69,43 @@ def write_start_joints(path: str, joints: List[float]) -> None:
     open(path, "w").write(src[: m.start()] + f"{m.group(1)}[{body}]" + src[m.end():])
 
 
+def read_both(left_cfg: str, right_cfg: str):
+    return read_arm(channel_of(left_cfg)), read_arm(channel_of(right_cfg))
+
+
+def wait_until_still(left_cfg: str, right_cfg: str, settle_s: float, tol_rad: float, timeout_s: float):
+    """Poll both arms and return the pose once nothing has moved for ``settle_s``.
+
+    Lets one person hold the arms in the pose they want with both hands: run the command,
+    pose the arms, hold still, and it captures by itself. Prints a live readout.
+    """
+    import time
+
+    print(f"Hold both arms in the pose you want. Capturing once nothing moves for {settle_s:.0f}s "
+          f"(tolerance {tol_rad:.3f} rad). Ctrl-C to abort.\n")
+    prev = None
+    still_since = None
+    t0 = time.time()
+    while time.time() - t0 < timeout_s:
+        left, right = read_both(left_cfg, right_cfg)
+        now = left + right
+        moved = max(abs(a - b) for a, b in zip(now, prev)) if prev else float("inf")
+        if prev is not None and moved <= tol_rad:
+            still_since = still_since or time.time()
+            held = time.time() - still_since
+            if held >= settle_s:
+                print("\n  captured.\n")
+                return left, right
+        else:
+            still_since = None
+            held = 0.0
+        bar = "#" * int(10 * held / settle_s) if settle_s else ""
+        print(f"\r  L j6 {left[5]:+.3f}  R j6 {right[5]:+.3f}   moved {moved if prev else 0:.3f} rad   "
+              f"still {held:4.1f}s {bar:<10}", end="", flush=True)
+        prev = now
+    raise SystemExit(f"\ngave up after {timeout_s:.0f}s without a steady pose")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -77,13 +114,25 @@ def main() -> int:
     ap.add_argument("--gripper", type=float, default=None,
                     help="gripper command to store (default: keep what the config has; 1.0 = open)")
     ap.add_argument("--write", action="store_true", help="actually edit the configs (keeps a .bak)")
+    ap.add_argument("--settle", type=float, default=0.0, metavar="SEC",
+                    help="wait until the arms have not moved for SEC seconds, then capture "
+                         "(so you can hold the pose with both hands). 0 = read immediately.")
+    ap.add_argument("--settle_tol", type=float, default=0.01, metavar="RAD",
+                    help="how still counts as still (default 0.01 rad ~ 0.6 deg)")
+    ap.add_argument("--settle_timeout", type=float, default=180.0, metavar="SEC")
     a = ap.parse_args()
 
     print("Pose both arms by hand NOW; nothing is commanded, so they will not move.\n")
+    if a.settle > 0:
+        held_left, held_right = wait_until_still(a.left_config, a.right_config,
+                                                 a.settle, a.settle_tol, a.settle_timeout)
+        captured = {a.left_config: held_left, a.right_config: held_right}
+    else:
+        captured = {}
     rows = []
     for side, path in (("LEFT ", a.left_config), ("RIGHT", a.right_config)):
         ch = channel_of(path)
-        joints = read_arm(ch)
+        joints = captured.get(path) or read_arm(ch)
         old = current_start_joints(path) or [0.0] * (ARM_JOINTS + 1)
         grip = a.gripper if a.gripper is not None else (old[ARM_JOINTS] if len(old) > ARM_JOINTS else 1.0)
         new = [round(v, 4) for v in joints] + [grip]
