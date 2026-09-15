@@ -50,8 +50,11 @@ def read_arm(channel: str) -> List[float]:
 def channel_of(path: str) -> str:
     from omegaconf import OmegaConf
 
+    from gello.robots.yam import resolve_can_channel
+
     cfg = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
-    return str(cfg["robot"]["channel"])
+    # configs carry the adapter's USB serial, not canN (see resolve_can_channel)
+    return resolve_can_channel(str(cfg["robot"]["channel"]))
 
 
 def current_start_joints(path: str) -> Optional[List[float]]:

@@ -23,7 +23,7 @@ agent:
     # at ~113.5 deg, just past the released bound, so hands-off = fully open.
     gripper_config: [14, 57.5288, 112.1880]
   # Gripper 1.0 = OPEN at home, same as the left arm (a released trigger is open).
-  start_joints: [-0.0338, 0.0063, 0.0055, -0.0967, -0.0570, -0.6357, 1.0000]
+  start_joints: [-0.0322, 0.0059, 0.0048, -0.0971, 0.0559, -0.0856, 1.0000]
 hz: 30
 max_steps: 1000
 
