@@ -57,11 +57,14 @@ def main() -> None:
     print("-" * 64)
 
     ready = True
+
+    verdicts: dict = {}
     for role, entry in cams.items():
         sn = entry["device_id"]
         dev = devs.get(sn)
         if dev is None:
             print(f"{role:14}{sn:16}{'--':6}{'--':>8}{'--':>8}   NOT CONNECTED")
+            verdicts[role] = "NOT CONNECTED"
             ready = False
             continue
 
@@ -91,6 +94,7 @@ def main() -> None:
         ready &= ok
         verdict = "ok" if ok else (probe or ("USB2 LINK -- move to a USB 3 port"
                                              if usb.startswith("2") else "mode unsupported"))
+        verdicts[role] = verdict
         print(f"{role:14}{sn:16}{usb:6}{'YES' if col else 'NO':>8}{'YES' if dep else 'NO':>8}   {verdict}")
 
     print("-" * 64)
@@ -98,9 +102,23 @@ def main() -> None:
         print("READY -- data collection can start.")
     else:
         print("NOT READY -- collection will fail with 'Couldn't resolve requests'.")
-        print("\nA camera showing USB 2.x must move to a USB 3 socket. Note that not")
-        print("every port on a USB 3 controller is wired for USB 3: swap it into a")
-        print("socket where another camera already reports 3.x, and re-run this.")
+        # Advice for the failure that actually occurred -- printing the USB-2 hint at a
+        # camera that is linked at 3.2 sent the operator chasing the wrong thing (2026-09-14).
+        bad = {r: v for r, v in verdicts.items() if v != "ok"}
+        if any(v.startswith("USB2 LINK") for v in bad.values()):
+            print("\nA camera showing USB 2.x must move to a USB 3 socket. Note that not")
+            print("every port on a USB 3 controller is wired for USB 3: swap it into a")
+            print("socket where another camera already reports 3.x, and re-run this.")
+        if any("NOT CONNECTED" in v or "not connected" in v for v in bad.values()):
+            print("\nNOT CONNECTED = the serial is not on the USB bus at all. Re-seat that")
+            print("camera's USB-C plug at BOTH ends, then re-run. `sudo dmesg -T | tail -20`")
+            print("shows the link errors ('error -71', 'UVC probe control : -32' = bad")
+            print("cable/connector, not a config or driver problem).")
+        if any(v.startswith("start failed") or v.startswith("NO FRAMES") or v == "mode unsupported"
+               for v in bad.values()):
+            print("\nThe camera enumerates but will not stream: it came back half-initialised")
+            print("after a link drop. Re-seat its USB-C plug (a hardware_reset or a port")
+            print("unbind/rebind usually is NOT enough), then re-run.")
     sys.exit(0 if ready else 1)
 
 
