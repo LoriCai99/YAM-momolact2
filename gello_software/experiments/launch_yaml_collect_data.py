@@ -154,15 +154,25 @@ def _preflight_via_server(rep_endpoint: str, camera_cfg: dict) -> None:
     configured role must be served with the configured serial, and a fresh obs must
     have no stale camera.
     """
-    from gello.cameras.camera_client import CameraClient
+    from gello.cameras.camera_client import CameraClient, CameraClientError
 
-    c = CameraClient(rep_endpoint, request_timeout_ms=3000)
+    # max_frame_age_sec=None: a stale camera must show up as a FAIL row in the table below,
+    # not as a CameraClientError traceback out of get_obs_full().
+    c = CameraClient(rep_endpoint, request_timeout_ms=3000, max_frame_age_sec=None)
     try:
         meta = c.get_meta()
         obs = c.get_obs_full()
+    except CameraClientError as e:
+        print(f"Refusing to start: the running camera server did not answer: {e}")
+        print("    pkill -f gello.cameras.camera_server   # then relaunch; it starts its own")
+        raise SystemExit(2) from None
     finally:
         c.close()
     stale = set(obs.get("stale") or [])
+    now = time.time()
+    for name, ts in (obs.get("timestamps") or {}).items():
+        if ts and now - ts > 0.5:
+            stale.add(name)
     frames = obs.get("frames") or {}
     print("Camera pre-flight via the running camera server:")
     bad = []
@@ -178,12 +188,16 @@ def _preflight_via_server(rep_endpoint: str, camera_cfg: dict) -> None:
         elif shape != (STREAM_HEIGHT, STREAM_WIDTH):
             problems.append(f"frame is {shape[1]}x{shape[0]}, need {STREAM_WIDTH}x{STREAM_HEIGHT}")
         if r in stale:
-            problems.append("STALE (camera stopped delivering frames)")
+            age = (obs.get("timestamps") or {}).get(r)
+            problems.append("STALE" + (f" ({now - age:.0f}s since its last frame)" if age else "")
+                            + " -- camera stopped delivering frames")
         print(f"  {r:13} {have:14} {'OK' if not problems else 'FAIL: ' + '; '.join(problems)}")
         if problems:
             bad.append(r)
     if bad:
         print("\nRefusing to start: the running camera server cannot provide the cameras above.")
+        print("A STALE camera is a USB-link/hardware condition (check `dmesg -T | grep -i usb` and")
+        print("`python scripts/check_cameras.py`); restarting the server will not fix it.")
         print("If that server is stale, stop it and relaunch (the launcher then starts its own):")
         print("    pkill -f gello.cameras.camera_server")
         raise SystemExit(2)
