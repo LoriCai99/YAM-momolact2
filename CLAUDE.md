@@ -126,7 +126,14 @@ both move. Observed so far:
 | `003D0065594E501820313332` | LEFT | `can1`, USB 1-5 | `can0`, USB 1-8 |
 | `00630059594E501820313332` | RIGHT | `can0`, USB 1-7 | `can1`, USB 1-6 |
 
-So **check the serial, not the name**, after any replug:
+**Fixed 2026-09-14 (commit below): `channel:` in the configs is now the adapter's USB
+serial, not `canN`.** `resolve_can_channel()` in `gello/robots/yam.py` maps it to whichever
+interface currently belongs to that adapter, so re-plugs no longer mirror left/right. A
+literal `canN` still works if you want it. If teleop is ever mirrored again, the serial ->
+arm mapping itself is wrong: swap the two serials between `yam_left*.yaml` and
+`yam_right.yaml` (that is a one-line change and it is then permanent).
+
+To see the current mapping:
 `for c in can0 can1; do d=$(readlink -f /sys/class/net/$c/device); echo "$c $(cat $(dirname $d)/serial)"; done`
 then set `channel:` in the left/right configs to match. A udev rule keyed on the serial
 would make this permanent and is the real fix; until someone adds it, this will recur

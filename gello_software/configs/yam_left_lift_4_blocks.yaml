@@ -28,7 +28,11 @@ robot:
   # can1 stayed at 0.0). The 2026-09-08 note (can0 = left) predates a replug of the
   # right-arm CAN adapter (it moved from USB 1-8 to 1-5). After ANY re-cabling,
   # re-run scripts/identify_sides.py or /home/evan/projects/yam_deploy/which_arm.py.
-  channel: can0
+  # The adapter's USB serial, not canN: can0/can1 are handed out in USB
+  # enumeration order and swap between the arms on every re-plug (twice on
+  # 2026-09-14 alone), which silently mirrors left/right in recorded data.
+  # resolve_can_channel() in gello/robots/yam.py maps this to the live canN.
+  channel: "003D0065594E501820313332"   # LEFT arm
 agent:
   _target_: gello.agents.gello_agent.GelloAgent
   # VERIFIED 2026-09-08 with scripts/identify_sides.py: FTAO9WPU is the leader on

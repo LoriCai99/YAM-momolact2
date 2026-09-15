@@ -2,7 +2,11 @@ robot:
   _target_: gello.robots.yam.YAMRobot
   # can0 = RIGHT arm. VERIFIED 2026-09-09 (hand test: right arm moved can0 by 70 deg,
   # can1 by 0.0). See yam_left.yaml.
-  channel: can1
+  # The adapter's USB serial, not canN: can0/can1 are handed out in USB
+  # enumeration order and swap between the arms on every re-plug (twice on
+  # 2026-09-14 alone), which silently mirrors left/right in recorded data.
+  # resolve_can_channel() in gello/robots/yam.py maps this to the live canN.
+  channel: "00630059594E501820313332"   # RIGHT arm
 agent:
   _target_: gello.agents.gello_agent.GelloAgent
   # VERIFIED 2026-09-08 with scripts/identify_sides.py: FTAO9WCV is the leader on

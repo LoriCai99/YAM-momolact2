@@ -6,6 +6,42 @@ from gello.robots.robot import Robot
 from i2rt.robots.utils import GripperType
 
 
+def resolve_can_channel(channel: str) -> str:
+    """Map a config ``channel:`` to a live SocketCAN interface name.
+
+    ``can0``/``can1`` are handed out in USB enumeration order, so they swap between the
+    two arms whenever the gs_usb adapters are re-plugged -- silently mirroring left/right
+    in every recorded episode. The adapter's USB serial is the only stable identity, so
+    ``channel:`` may instead be that serial (or ``serial:<S>``), and this resolves it to
+    whichever ``canN`` currently belongs to that adapter.
+
+    A plain ``canN`` is returned unchanged, so existing configs keep working.
+    """
+    import glob
+    import os
+
+    want = str(channel)
+    if want.startswith("serial:"):
+        want = want[len("serial:"):]
+    elif want.startswith("can") and want[3:].isdigit():
+        return want  # a literal interface name; caller accepts the enumeration-order risk
+
+    found = {}
+    for net in glob.glob("/sys/class/net/can*"):
+        dev = os.path.realpath(os.path.join(net, "device"))
+        try:
+            with open(os.path.join(os.path.dirname(dev), "serial")) as f:
+                found[f.read().strip()] = os.path.basename(net)
+        except OSError:
+            continue
+    if want in found:
+        return found[want]
+    raise RuntimeError(
+        f"no CAN adapter with USB serial {want!r} is present; adapters seen: "
+        + (", ".join(f"{s} -> {i}" for s, i in sorted(found.items())) or "none")
+    )
+
+
 class YAMRobot(Robot):
     """A class representing a simulated YAM robot."""
 
@@ -25,6 +61,7 @@ class YAMRobot(Robot):
             f.__defaults__ = (max_retry,) + tuple(f.__defaults__[1:])
 
     def __init__(self, channel="can0", connect_attempts: int = 3, retry_delay_s: float = 1.0):
+        channel = resolve_can_channel(channel)
         from i2rt.robots.get_robot import get_yam_robot
 
         self._channel = channel
