@@ -6,7 +6,7 @@
 sensors:
   cameras:
     left_camera:
-      device_id: "353322270868"    # D405 (short range), left. Replaced 2026-09-08
+      device_id: "260422272901"    # D405 (short range), left. Replaced 2026-09-17
                                    # (old 335122270697 died: enumerated but could not stream)
     front_camera:
       device_id: "922612071156"    # D435 (wide FOV), front/top role.
